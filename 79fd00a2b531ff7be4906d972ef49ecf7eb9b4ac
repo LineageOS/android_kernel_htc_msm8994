@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ff82abbf_586cda07",
+        "filename": "drivers/bluetooth/bluesleep.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 114,
+      "author": {
+        "id": 2936
+      },
+      "writtenOn": "2015-11-28T01:16:21Z",
+      "side": 1,
+      "message": "I\u0027m pretty sure this is the line that actually addresses the issue. The crash you guys were seeing occurs because the system times out on commands.",
+      "revId": "79fd00a2b531ff7be4906d972ef49ecf7eb9b4ac",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
