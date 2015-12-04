@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "bf8cb3f7_7bd0b851",
+        "filename": "drivers/i2c/chips/CwMcuSensor.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 5383,
+      "author": {
+        "id": 2936
+      },
+      "writtenOn": "2015-12-04T12:20:04Z",
+      "side": 1,
+      "message": "If someone can figure out what the contents of these 4 bytes are on a stock ROM, that should be sufficient to enable double tap wake.",
+      "revId": "dca0e0824109092ad171a0d8e10680086c951488",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
