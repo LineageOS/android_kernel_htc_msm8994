@@ -115,7 +115,7 @@ DECLARE_DELAYED_WORK(sleep_workqueue, bluesleep_sleep_work);
 #define bluesleep_hsuart_clk_check()     schedule_delayed_work(&sleep_workqueue, msecs_to_jiffies(10))
 
 /* 1 second timeout */
-#define TX_TIMER_INTERVAL  1 //HTC_BT: change from 5 to 1
+#define TX_TIMER_INTERVAL  5 //HTC_BT: change from 5 to 1
 
 /* state variable names and bit positions */
 #define BT_PROTO		0x01    // Set / unset when start / stop Sleep-Mode Protocol
