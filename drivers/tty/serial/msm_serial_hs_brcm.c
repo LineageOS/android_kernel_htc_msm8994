@@ -74,8 +74,6 @@ static void *ipc_msm_hs_log_ctxt;
 #define IPC_MSM_HS_LOG_PAGES 5
 #define UART_DMA_DESC_NR 8
 
-#define htc_bt_pri pr_info //HTC_BT
-
 /* If the debug_mask gets set to FATAL_LEV,
  * a fatal error has happened and further IPC logging
  * is disabled so that this problem can be detected
@@ -262,7 +260,7 @@ struct msm_hs_port {
 };
 
 static struct of_device_id msm_hs_match_table[] = {
-	{ .compatible = "qcom,msm-hsuart-v14-brcm"},
+	{ .compatible = "qcom,msm-hsuart-v14"},
 	{}
 };
 
@@ -290,14 +288,6 @@ static void msm_hs_bus_voting(struct msm_hs_port *msm_uport, unsigned int vote);
 static struct msm_hs_port *msm_hs_get_hs_port(int port_index);
 static void msm_hs_queue_rx_desc(struct msm_hs_port *msm_uport);
 
-unsigned int msm_hs_tx_empty_brcm(struct uart_port *uport);
-void msm_hs_request_clock_off_brcm(struct uart_port *uport);
-void msm_hs_request_clock_on_brcm(struct uart_port *uport);
-struct uart_port *msm_hs_get_uart_port_brcm(int port_index);
-void msm_hs_set_mctrl_brcm(struct uart_port *uport,
-				    unsigned int mctrl);
-
-
 #define UARTDM_TO_MSM(uart_port) \
 	container_of((uart_port), struct msm_hs_port, uport)
 
@@ -313,12 +303,12 @@ static int msm_hs_ioctl(struct uart_port *uport, unsigned int cmd,
 	switch (cmd) {
 	case MSM_ENABLE_UART_CLOCK: {
 		MSM_HS_DBG("%s():ENABLE UART CLOCK: cmd=%d\n", __func__, cmd);
-		msm_hs_request_clock_on_brcm(&msm_uport->uport);
+		msm_hs_request_clock_on(&msm_uport->uport);
 		break;
 	}
 	case MSM_DISABLE_UART_CLOCK: {
 		MSM_HS_DBG("%s():DISABLE UART CLOCK: cmd=%d\n", __func__, cmd);
-		msm_hs_request_clock_off_brcm(&msm_uport->uport);
+		msm_hs_request_clock_off(&msm_uport->uport);
 		break;
 	}
 	case MSM_GET_UART_CLOCK_STATUS: {
@@ -376,7 +366,7 @@ static int msm_hs_clock_vote(struct msm_hs_port *msm_uport)
 			return rc;
 		}
 		msm_uport->clk_state = MSM_HS_CLK_ON;
-		/*MSM_HS_DBG*/htc_bt_pri("%s: Clock ON successful\n", __func__);
+		MSM_HS_DBG("%s: Clock ON successful\n", __func__);
 	}
 	mutex_unlock(&msm_uport->clk_mutex);
 
@@ -405,7 +395,7 @@ static void msm_hs_clock_unvote(struct msm_hs_port *msm_uport)
 		/* Unvote the PNOC clock */
 		msm_hs_bus_voting(msm_uport, BUS_RESET);
 		msm_uport->clk_state = MSM_HS_CLK_OFF;
-		/*MSM_HS_DBG*/htc_bt_pri("%s: Clock OFF successful\n", __func__);
+		MSM_HS_DBG("%s: Clock OFF successful\n", __func__);
 	}
 	mutex_unlock(&msm_uport->clk_mutex);
 }
@@ -468,11 +458,11 @@ static ssize_t set_clock(struct device *dev, struct device_attribute *attr,
 		state = buf[0] - '0';
 		switch (state) {
 		case 0:
-			msm_hs_request_clock_off_brcm(&msm_uport->uport);
+			msm_hs_request_clock_off(&msm_uport->uport);
 			ret = count;
 			break;
 		case 1:
-			msm_hs_request_clock_on_brcm(&msm_uport->uport);
+			msm_hs_request_clock_on(&msm_uport->uport);
 			ret = count;
 			break;
 		default:
@@ -1008,7 +998,6 @@ static void msm_hs_enable_flow_control(struct uart_port *uport)
 	unsigned int data;
 
 	if (msm_uport->flow_control) {
-		htc_bt_pri("%s()\n", __func__);
 		/* Enable RFR line */
 		msm_hs_write(uport, UART_DM_CR, RFR_LOW);
 		/* Enable auto RFR */
@@ -1031,7 +1020,6 @@ static void msm_hs_disable_flow_control(struct uart_port *uport)
 	 */
 
 	if (msm_uport->flow_control) {
-		htc_bt_pri("%s()\n", __func__);
 		data = msm_hs_read(uport, UART_DM_MR1);
 		/* disable auto ready-for-receiving */
 		data &= ~UARTDM_MR1_RX_RDY_CTL_BMSK;
@@ -1184,7 +1172,6 @@ static void msm_hs_set_termios(struct uart_port *uport,
 	 * RX FIFO.
 	 */
 	/* Pulling RFR line high */
-	htc_bt_pri("%s(): RFR set to LOW\n", __func__);
 	msm_hs_write(uport, UART_DM_CR, RFR_LOW);
 	data = msm_hs_read(uport, UART_DM_MR1);
 	data &= ~(UARTDM_MR1_CTS_CTL_BMSK | UARTDM_MR1_RX_RDY_CTL_BMSK);
@@ -1207,7 +1194,7 @@ static void msm_hs_set_termios(struct uart_port *uport,
  *  Standard API, Transmitter
  *  Any character in the transmit shift register is sent
  */
-unsigned int msm_hs_tx_empty_brcm(struct uart_port *uport)
+unsigned int msm_hs_tx_empty(struct uart_port *uport)
 {
 	unsigned int data;
 	unsigned int ret = 0;
@@ -1223,7 +1210,7 @@ unsigned int msm_hs_tx_empty_brcm(struct uart_port *uport)
 
 	return ret;
 }
-EXPORT_SYMBOL(msm_hs_tx_empty_brcm);
+EXPORT_SYMBOL(msm_hs_tx_empty);
 
 /*
  *  Standard API, Stop transmitter.
@@ -1311,7 +1298,7 @@ static void msm_hs_stop_rx_locked(struct uart_port *uport)
 }
 
 /* Tx timeout callback function */
-void tx_timeout_handler_brcm(unsigned long arg)
+void tx_timeout_handler(unsigned long arg)
 {
 	struct msm_hs_port *msm_uport = (struct msm_hs_port *) arg;
 	struct uart_port *uport = &msm_uport->uport;
@@ -1326,6 +1313,11 @@ void tx_timeout_handler_brcm(unsigned long arg)
 	if (UARTDM_ISR_CURRENT_CTS_BMSK & isr)
 		MSM_HS_WARN("%s(): CTS Disabled, ISR 0x%x", __func__, isr);
 	dump_uart_hs_registers(msm_uport);
+	/* Log BAM TX pipe debug information */
+	sps_get_bam_debug_info(msm_uport->bam_handle,
+			93,
+			SPS_BAM_PIPE(msm_uport->bam_tx_ep_pipe_index),
+			0, 2);
 }
 
 /*  Transmit the next chunk of data */
@@ -1938,7 +1930,7 @@ static unsigned int msm_hs_get_mctrl_locked(struct uart_port *uport)
  * back auto ready for receiving and it should lower RFR signal
  * when hardware is ready
  */
-void msm_hs_set_mctrl_locked_brcm(struct uart_port *uport,
+void msm_hs_set_mctrl_locked(struct uart_port *uport,
 				    unsigned int mctrl)
 {
 	unsigned int set_rts;
@@ -1957,7 +1949,7 @@ void msm_hs_set_mctrl_locked_brcm(struct uart_port *uport,
 		msm_hs_enable_flow_control(uport);
 }
 
-void msm_hs_set_mctrl_brcm(struct uart_port *uport,
+void msm_hs_set_mctrl(struct uart_port *uport,
 				    unsigned int mctrl)
 {
 	unsigned long flags;
@@ -1965,11 +1957,11 @@ void msm_hs_set_mctrl_brcm(struct uart_port *uport,
 
 	msm_hs_clock_vote(msm_uport);
 	spin_lock_irqsave(&uport->lock, flags);
-	msm_hs_set_mctrl_locked_brcm(uport, mctrl);
+	msm_hs_set_mctrl_locked(uport, mctrl);
 	spin_unlock_irqrestore(&uport->lock, flags);
 	msm_hs_clock_unvote(msm_uport);
 }
-EXPORT_SYMBOL(msm_hs_set_mctrl_brcm);
+EXPORT_SYMBOL(msm_hs_set_mctrl);
 
 /* Standard API, Enable modem status (CTS) interrupt  */
 static void msm_hs_enable_ms_locked(struct uart_port *uport)
@@ -2056,7 +2048,7 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 		mutex_unlock(&msm_uport->clk_mutex);
 		return 1;
 	}
-	/*MSM_HS_DBG*/htc_bt_pri("In %s:\n", __func__);
+	MSM_HS_DBG("In %s:\n", __func__);
 	/* Cancel if tx tty buffer is not empty, dma is in flight,
 	 * or tx fifo is not empty
 	 */
@@ -2073,7 +2065,7 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 		}
 		spin_unlock_irqrestore(&uport->lock, flags);
 		mutex_unlock(&msm_uport->clk_mutex);
-		/*MSM_HS_DBG*/htc_bt_pri("%s(): clkstate %d\n", __func__, msm_uport->clk_state);
+		MSM_HS_DBG("%s(): clkstate %d", __func__, msm_uport->clk_state);
 		return -1;
 	}
 
@@ -2084,7 +2076,7 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 	if (!(sr_status & UARTDM_SR_TXEMT_BMSK)) {
 		spin_unlock_irqrestore(&uport->lock, flags);
 		mutex_unlock(&msm_uport->clk_mutex);
-		/*MSM_HS_DBG*/htc_bt_pri("%s(): SR TXEMT fail %lx", __func__, sr_status);
+		MSM_HS_DBG("%s(): SR TXEMT fail %lx", __func__, sr_status);
 		return 0;  /* retry */
 	}
 
@@ -2092,7 +2084,7 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 		if (msm_uport->rx.flush == FLUSH_NONE)
 			msm_hs_stop_rx_locked(uport);
 
-		/*MSM_HS_DBG*/htc_bt_pri("%s: rx.flush %d clk_state %d\n", __func__,
+		MSM_HS_DBG("%s: rx.flush %d clk_state %d\n", __func__,
 			msm_uport->rx.flush, msm_uport->clk_state);
 		spin_unlock_irqrestore(&uport->lock, flags);
 		mutex_unlock(&msm_uport->clk_mutex);
@@ -2100,7 +2092,9 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 	}
 
 	spin_unlock_irqrestore(&uport->lock, flags);
-	//msm_hs_enable_flow_control(uport); //HTC_BT remove
+#if 0
+	msm_hs_enable_flow_control(uport);
+#endif
 
 	/* we really want to clock off */
 	mutex_unlock(&msm_uport->clk_mutex);
@@ -2128,7 +2122,7 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 	spin_unlock_irqrestore(&uport->lock, flags);
 
 	mutex_unlock(&msm_uport->clk_mutex);
-	/*MSM_HS_INFO*/htc_bt_pri("%s: Clocks Off Successfully\n", __func__);
+	MSM_HS_INFO("%s: Clocks Off Successfully\n", __func__);
 	return 1;
 }
 
@@ -2251,7 +2245,7 @@ static irqreturn_t msm_hs_isr(int irq, void *dev)
  * The function msm_hs_get_hs_port is for internal use
  */
 
-struct uart_port *msm_hs_get_uart_port_brcm(int port_index)
+struct uart_port *msm_hs_get_uart_port(int port_index)
 {
 	struct uart_state *state = msm_hs_driver.state + port_index;
 
@@ -2264,18 +2258,18 @@ struct uart_port *msm_hs_get_uart_port_brcm(int port_index)
 
 	return NULL;
 }
-EXPORT_SYMBOL(msm_hs_get_uart_port_brcm);
+EXPORT_SYMBOL(msm_hs_get_uart_port);
 
 static struct msm_hs_port *msm_hs_get_hs_port(int port_index)
 {
-	struct uart_port *uport = msm_hs_get_uart_port_brcm(port_index);
+	struct uart_port *uport = msm_hs_get_uart_port(port_index);
 	if (uport)
 		return UARTDM_TO_MSM(uport);
 	return NULL;
 }
 
 /* request to turn off uart clock once pending TX is flushed */
-void msm_hs_request_clock_off_brcm(struct uart_port *uport) {
+void msm_hs_request_clock_off(struct uart_port *uport) {
 	unsigned long flags;
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 	int data;
@@ -2294,9 +2288,9 @@ void msm_hs_request_clock_off_brcm(struct uart_port *uport) {
 	}
 	spin_unlock_irqrestore(&uport->lock, flags);
 }
-EXPORT_SYMBOL(msm_hs_request_clock_off_brcm);
+EXPORT_SYMBOL(msm_hs_request_clock_off);
 
-void msm_hs_request_clock_on_brcm(struct uart_port *uport)
+void msm_hs_request_clock_on(struct uart_port *uport)
 {
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 	unsigned long flags;
@@ -2317,9 +2311,7 @@ void msm_hs_request_clock_on_brcm(struct uart_port *uport)
 
 	if (cur_clk_state == MSM_HS_CLK_REQUEST_OFF) {
 		msm_uport->clk_state = MSM_HS_CLK_ON;
-		htc_bt_pri("%s(): clk_state change from REQUEST_OFF to ON\n", __func__);
-		// [HTC_BT] Do NOT enable or Rx will lost data when UART resume from REQUEST_OFF
-		//msm_hs_enable_flow_control(uport);
+		msm_hs_enable_flow_control(uport);
 	}
 
 	switch (cur_clk_state) {
@@ -2397,7 +2389,7 @@ void msm_hs_request_clock_on_brcm(struct uart_port *uport)
 	mutex_unlock(&msm_uport->clk_mutex);
 	msm_hs_clock_unvote(msm_uport);
 }
-EXPORT_SYMBOL(msm_hs_request_clock_on_brcm);
+EXPORT_SYMBOL(msm_hs_request_clock_on);
 
 static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
 {
@@ -2423,7 +2415,7 @@ static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
 		 * optionally inject char into tty rx
 		 */
 		spin_unlock_irqrestore(&uport->lock, flags);
-		msm_hs_request_clock_on_brcm(uport);
+		msm_hs_request_clock_on(uport);
 		spin_lock_irqsave(&uport->lock, flags);
 		if (msm_uport->wakeup.inject_rx) {
 			tty = uport->state->port.tty;
@@ -2476,11 +2468,10 @@ static void msm_hs_unconfig_uart_gpios(struct uart_port *uport)
  */
 static int msm_hs_config_uart_gpios(struct uart_port *uport)
 {
-	int ret = 0;
-#if 0 //HTC_BT: rfkill to control uart settings
 	struct platform_device *pdev = to_platform_device(uport->dev);
 	const struct msm_serial_hs_platform_data *pdata =
 					pdev->dev.platform_data;
+	int ret = 0;
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 
 	if (!IS_ERR_OR_NULL(msm_uport->pinctrl)) {
@@ -2549,7 +2540,6 @@ uart_tx_unconfig:
 	if (gpio_is_valid(pdata->uart_tx_gpio))
 		gpio_free(pdata->uart_tx_gpio);
 exit_uart_config:
-#endif
 	return ret;
 }
 
@@ -2609,8 +2599,6 @@ static int msm_hs_startup(struct uart_port *uport)
 	struct msm_hs_rx *rx = &msm_uport->rx;
 	struct sps_pipe *sps_pipe_handle_tx = tx->cons.pipe_handle;
 	struct sps_pipe *sps_pipe_handle_rx = rx->prod.pipe_handle;
-
-	htc_bt_pri("%s\n", __func__);
 
 	rfr_level = uport->fifosize;
 	if (rfr_level > 16)
@@ -2695,7 +2683,7 @@ static int msm_hs_startup(struct uart_port *uport)
 	tx->dma_in_flight = 0;
 	MSM_HS_DBG("%s():desc usage flag 0x%lx", __func__, rx->queued_flag);
 	setup_timer(&(tx->tx_timeout_timer),
-			tx_timeout_handler_brcm,
+			tx_timeout_handler,
 			(unsigned long) msm_uport);
 
 	/* Enable reading the current CTS, no harm even if CTS is ignored */
@@ -2776,9 +2764,9 @@ static int uartdm_init_port(struct uart_port *uport)
 	init_waitqueue_head(&rx->wait);
 	init_waitqueue_head(&tx->wait);
 	init_waitqueue_head(&msm_uport->bam_disconnect_wait);
-	wake_lock_init(&rx->wake_lock, WAKE_LOCK_SUSPEND, "msm_serial_hs_rx_brcm");
+	wake_lock_init(&rx->wake_lock, WAKE_LOCK_SUSPEND, "msm_serial_hs_rx");
 	wake_lock_init(&msm_uport->dma_wake_lock, WAKE_LOCK_SUSPEND,
-		       "msm_serial_hs_dma_brcm");
+		       "msm_serial_hs_dma");
 
 	tasklet_init(&rx->tlet, msm_serial_hs_rx_tlet,
 			(unsigned long) &rx->tlet);
@@ -2811,7 +2799,7 @@ exit_tasklet_init:
 }
 
 struct msm_serial_hs_platform_data
-	*msm_hs_dt_to_pdata_brcm(struct platform_device *pdev)
+	*msm_hs_dt_to_pdata(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 	struct msm_serial_hs_platform_data *pdata;
@@ -2855,7 +2843,6 @@ struct msm_serial_hs_platform_data
 	pdata->inject_rx_on_wakeup = of_property_read_bool(node,
 				"qcom,inject-rx-on-wakeup");
 
-	pdata->inject_rx_on_wakeup = 0;//HTC_BT remove
 	if (pdata->inject_rx_on_wakeup) {
 		ret = of_property_read_u32(node, "qcom,rx-char-to-inject",
 						&rx_to_inject);
@@ -3145,7 +3132,7 @@ static int msm_hs_probe(struct platform_device *pdev)
 
 	if (pdev->dev.of_node) {
 		dev_dbg(&pdev->dev, "device tree enabled\n");
-		pdata = msm_hs_dt_to_pdata_brcm(pdev);
+		pdata = msm_hs_dt_to_pdata(pdev);
 		if (IS_ERR(pdata))
 			return PTR_ERR(pdata);
 
@@ -3166,11 +3153,6 @@ static int msm_hs_probe(struct platform_device *pdev)
 		}
 		pdev->dev.platform_data = pdata;
 	}
-
-	// [HTC_BT][M601][F201605031752][Klocwork] +++
-	if (IS_ERR_OR_NULL(pdata))
-		return PTR_ERR(pdata);
-	// [HTC_BT][M601][F201605031752][Klocwork] ---
 
 	if (pdev->id < 0 || pdev->id >= UARTDM_NR) {
 		MSM_HS_ERR("Invalid plaform device ID = %d\n", pdev->id);
@@ -3216,7 +3198,6 @@ static int msm_hs_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 	wakeup_irqres = platform_get_irq_byname(pdev, "wakeup_irq");
-	wakeup_irqres = -1;//HTC_BT force disable
 	if (wakeup_irqres < 0) {
 		wakeup_irqres = -1;
 		MSM_HS_DBG("Wakeup irq not specified.\n");
@@ -3399,7 +3380,7 @@ static int __init msm_serial_hs_init(void)
 	int ret;
 
 	ipc_msm_hs_log_ctxt = ipc_log_context_create(IPC_MSM_HS_LOG_PAGES,
-							"msm_serial_hs_brcm", 0);
+							"msm_serial_hs", 0);
 	if (!ipc_msm_hs_log_ctxt)
 		MSM_HS_WARN("%s: error creating logging context", __func__);
 
@@ -3408,7 +3389,7 @@ static int __init msm_serial_hs_init(void)
 		MSM_HS_ERR("%s failed to load\n", __func__);
 		return ret;
 	}
-	debug_base = debugfs_create_dir("msm_serial_hs_brcm", NULL);
+	debug_base = debugfs_create_dir("msm_serial_hs", NULL);
 	if (IS_ERR_OR_NULL(debug_base))
 		pr_info("msm_serial_hs: Cannot create debugfs dir\n");
 
@@ -3437,8 +3418,6 @@ static void msm_hs_shutdown(struct uart_port *uport)
 	struct msm_hs_tx *tx = &msm_uport->tx;
 	struct sps_pipe *sps_pipe_handle = tx->cons.pipe_handle;
 	unsigned long flags;
-
-	htc_bt_pri("%s\n", __func__);
 
 	/*
 	 * cancel the hrtimer first so that
@@ -3528,18 +3507,6 @@ static void msm_hs_shutdown(struct uart_port *uport)
 		free_irq(msm_uport->wakeup.irq, msm_uport);
 
 	msm_hs_unconfig_uart_gpios(uport);
-
-#if 0 //HTC_BT: rfkill to control uart settings
-	//HTC_BT ++
-	if (msm_uport->use_pinctrl) {
-		htc_bt_pri("%s: set gpio_state_suspend\n", __func__);
-		ret = pinctrl_select_state(msm_uport->pinctrl,
-					msm_uport->gpio_state_suspend);
-		if (ret)
-			htc_bt_pri("%s(): error select suspend state", __func__);
-	}
-	//HTC_BT --
-#endif
 }
 
 static void __exit msm_serial_hs_exit(void)
@@ -3564,17 +3531,16 @@ static int msm_hs_runtime_resume(struct device *dev)
 	struct platform_device *pdev = container_of(dev, struct
 						    platform_device, dev);
 	struct msm_hs_port *msm_uport = get_matching_hs_port(pdev);
-//	int ret;
-
-	htc_bt_pri("%s\n", __func__);
+#if 0
+	int ret;
+#endif
 
 	/* This check should not fail
 	 * During probe, we set uport->line to either pdev->id or userid */
 	if (msm_uport) {
-		msm_hs_request_clock_on_brcm(&msm_uport->uport);
-#if 0 //HTC_BT: rfkill to control uart settings
+		msm_hs_request_clock_on(&msm_uport->uport);
+#if 0
 		if (msm_uport->use_pinctrl) {
-			htc_bt_pri("%s: set gpio_state_active\n", __func__);
 			ret = pinctrl_select_state(msm_uport->pinctrl,
 						msm_uport->gpio_state_active);
 			if (ret)
@@ -3591,17 +3557,16 @@ static int msm_hs_runtime_suspend(struct device *dev)
 	struct platform_device *pdev = container_of(dev, struct
 						    platform_device, dev);
 	struct msm_hs_port *msm_uport = get_matching_hs_port(pdev);
-//	int ret;
-
-	htc_bt_pri("%s\n", __func__);
+#if 0
+	int ret;
+#endif
 
 	/* This check should not fail
 	 * During probe, we set uport->line to either pdev->id or userid */
 	if (msm_uport) {
-		msm_hs_request_clock_off_brcm(&msm_uport->uport);
-#if 0 //HTC_BT: rfkill to control uart settings
+		msm_hs_request_clock_off(&msm_uport->uport);
+#if 0
 		if (msm_uport->use_pinctrl) {
-			htc_bt_pri("%s: set gpio_state_suspend\n", __func__);
 			ret = pinctrl_select_state(msm_uport->pinctrl,
 						msm_uport->gpio_state_suspend);
 			if (ret)
@@ -3613,8 +3578,6 @@ static int msm_hs_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-//HTC_BT ++
-/* Config UART GPIO settings from external driver */
 #define BT_UART_PORT_ID  0
 void msm_hs_uart_gpio_config_ext(int on)
 {
@@ -3623,11 +3586,9 @@ void msm_hs_uart_gpio_config_ext(int on)
 	if (msm_uport) {
 		if (msm_uport->use_pinctrl) {
 			if (on) {
-				htc_bt_pri("%s: set gpio_state_active\n", __func__);
 				ret = pinctrl_select_state(msm_uport->pinctrl,
 							msm_uport->gpio_state_active);
 			} else {
-				htc_bt_pri("%s: set gpio_state_suspend\n", __func__);
 				ret = pinctrl_select_state(msm_uport->pinctrl,
 							msm_uport->gpio_state_suspend);
 			}
@@ -3638,7 +3599,6 @@ void msm_hs_uart_gpio_config_ext(int on)
 }
 EXPORT_SYMBOL(msm_hs_uart_gpio_config_ext);
 
-/* Check UART port state */
 int msm_hs_uart_get_clk_state(void)
 {
 	struct msm_hs_port *msm_uport = msm_hs_get_hs_port(BT_UART_PORT_ID);
@@ -3649,7 +3609,6 @@ int msm_hs_uart_get_clk_state(void)
 	return ret;
 }
 EXPORT_SYMBOL(msm_hs_uart_get_clk_state);
-//HTC_BT --
 
 static const struct dev_pm_ops msm_hs_dev_pm_ops = {
 	.runtime_suspend = msm_hs_runtime_suspend,
@@ -3662,7 +3621,7 @@ static struct platform_driver msm_serial_hs_platform_driver = {
 	.probe	= msm_hs_probe,
 	.remove = msm_hs_remove,
 	.driver = {
-		.name = "msm_serial_hs_brcm",
+		.name = "msm_serial_hs",
 		.pm   = &msm_hs_dev_pm_ops,
 		.of_match_table = msm_hs_match_table,
 	},
@@ -3670,15 +3629,15 @@ static struct platform_driver msm_serial_hs_platform_driver = {
 
 static struct uart_driver msm_hs_driver = {
 	.owner = THIS_MODULE,
-	.driver_name = "msm_serial_hs_brcm",
+	.driver_name = "msm_serial_hs",
 	.dev_name = "ttyHS",
 	.nr = UARTDM_NR,
 	.cons = 0,
 };
 
 static struct uart_ops msm_hs_ops = {
-	.tx_empty = msm_hs_tx_empty_brcm,
-	.set_mctrl = msm_hs_set_mctrl_locked_brcm,
+	.tx_empty = msm_hs_tx_empty,
+	.set_mctrl = msm_hs_set_mctrl_locked,
 	.get_mctrl = msm_hs_get_mctrl_locked,
 	.stop_tx = msm_hs_stop_tx_locked,
 	.start_tx = msm_hs_start_tx_locked,
