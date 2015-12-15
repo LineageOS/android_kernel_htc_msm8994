@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ff6b8bd7_fd37e3e2",
+        "filename": "kernel/softirq.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 254,
+      "author": {
+        "id": 4803
+      },
+      "writtenOn": "2015-12-15T12:10:06Z",
+      "side": 1,
+      "message": "it\u0027s CONFIG_HTC_DEBUG_EARLY_RTB",
+      "revId": "e57bec64f7e41a5c468001d0f69456a0f6696be9",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
