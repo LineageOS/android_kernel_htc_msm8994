@@ -578,6 +578,7 @@ power_attr(pm_freeze_timeout);
 
 #endif	/* CONFIG_FREEZER*/
 
+#ifdef CONFIG_HTC_PNPMGR
 int powersave_enabled = 0;
 static ssize_t
 powersave_show(struct kobject *kobj, struct kobj_attribute *attr,
@@ -601,6 +602,7 @@ powersave_store(struct kobject *kobj, struct kobj_attribute *attr,
 	return n;
 }
 power_attr(powersave);
+#endif
 
 static char ktop_buf[1024];
 static ssize_t
