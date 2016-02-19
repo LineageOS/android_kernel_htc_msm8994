@@ -54,7 +54,7 @@
 #include <net/rtnetlink.h>
 #include <net/net_namespace.h>
 
-#if 1 // NW
+#ifdef CONFIG_HTC_NET_DEBUG // NW
 void net_dbg_log_event_oneline(int idx, const char * event, ...);
 int net_dbg_get_free_log_event_oneline(void);
 static int netd_rtnl_lock_idx = -1;
@@ -72,7 +72,7 @@ static DEFINE_MUTEX(rtnl_mutex);
 
 void rtnl_lock(void)
 {
-#if 1 // NW
+#ifdef CONFIG_HTC_NET_DEBUG // NW
 	if (current->real_parent)
 	{
 		if (strcmp(current->comm, "netd") == 0 ||
@@ -91,7 +91,7 @@ void rtnl_lock(void)
 
 	mutex_lock(&rtnl_mutex);
 
-#if 1 // NW
+#ifdef CONFIG_HTC_NET_DEBUG // NW
        if (current->real_parent) {
 		net_dbg_log_event_oneline(rtnl_lock_idx, "rtnl_lock by [%d,%s], parent=[%d,%s]", current->pid, current->comm, current->real_parent->pid, current->real_parent->comm);
        } else {
@@ -105,7 +105,7 @@ EXPORT_SYMBOL(rtnl_lock);
 void __rtnl_unlock(void)
 {
 	mutex_unlock(&rtnl_mutex);
-#if 1 // NW
+#ifdef CONFIG_HTC_NET_DEBUG // NW
        if (current->real_parent) {
 		net_dbg_log_event_oneline(rtnl_unlock_idx, "__rtnl_unlock  by [%d,%s], parent=[%d,%s]", current->pid, current->comm, current->real_parent->pid, current->real_parent->comm);
        } else {
@@ -2833,7 +2833,7 @@ void __init rtnetlink_init(void)
 	rtnl_register(PF_BRIDGE, RTM_DELLINK, rtnl_bridge_dellink, NULL, NULL);
 	rtnl_register(PF_BRIDGE, RTM_SETLINK, rtnl_bridge_setlink, NULL, NULL);
 
-#if 1 // NW
+#ifdef CONFIG_HTC_NET_DEBUG // NW
 	netd_rtnl_lock_idx = net_dbg_get_free_log_event_oneline();
 	rtnl_lock_idx = net_dbg_get_free_log_event_oneline();
 	rtnl_unlock_idx = net_dbg_get_free_log_event_oneline();
