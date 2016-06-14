@@ -16,6 +16,23 @@
       "revId": "f11af2b2889b3d6cc1f0ddc8e5115d2d3047a252",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "5faad753_a853af16",
+        "filename": "drivers/htc_ril/htc_modem_notifier.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 70,
+      "author": {
+        "id": 2936
+      },
+      "writtenOn": "2016-06-14T14:00:33Z",
+      "side": 1,
+      "message": "Isn\u0027t this a useless change? The case statement is only used in non-sprint modem cases, is it meant to be skipping the entire block below in SYS_POWER_OFF?",
+      "revId": "f11af2b2889b3d6cc1f0ddc8e5115d2d3047a252",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
