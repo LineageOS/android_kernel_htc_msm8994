@@ -3079,7 +3079,7 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 
 	if (dwc->gadget.speed != USB_SPEED_UNKNOWN)
 /*++ 2014/11/18 USB Team, PCN00048 ++*/
-		dwc3_disconnect_gadget(dwc, 1);
+		dwc3_disconnect_gadget(dwc, 0);
 /*-- 2014/11/18 USB Team, PCN00048 --*/
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
