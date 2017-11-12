@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014,2016 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -767,7 +767,7 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 		} else {
 			handle = ion_import_dma_buf(client, data.flush_data.fd);
 			if (IS_ERR(handle)) {
-				pr_info("%s: Could not import handle: %p\n",
+				pr_info("%s: Could not import handle: %pK\n",
 					__func__, handle);
 				return -EINVAL;
 			}
@@ -780,8 +780,8 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 			+ data.flush_data.length;
 
 		if (start && check_vaddr_bounds(start, end)) {
-			pr_err("%s: virtual address %p is out of bounds\n",
-				__func__, data.flush_data.vaddr);
+			pr_err("%s: virtual address %pK is out of bounds\n",
+			       __func__, data.flush_data.vaddr);
 			ret = -EINVAL;
 		} else {
 			ret = ion_do_cache_op(
@@ -799,16 +799,28 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 	}
 	case ION_IOC_PREFETCH:
 	{
-		ion_walk_heaps(client, data.prefetch_data.heap_id,
+		int ret;
+
+		ret = ion_walk_heaps(client, data.prefetch_data.heap_id,
+			ION_HEAP_TYPE_SECURE_DMA,
 			(void *)data.prefetch_data.len,
 			ion_secure_cma_prefetch);
+
+		if (ret)
+			return ret;
 		break;
 	}
 	case ION_IOC_DRAIN:
 	{
-		ion_walk_heaps(client, data.prefetch_data.heap_id,
+		int ret;
+
+		ret = ion_walk_heaps(client, data.prefetch_data.heap_id,
+			ION_HEAP_TYPE_SECURE_DMA,
 			(void *)data.prefetch_data.len,
 			ion_secure_cma_drain_pool);
+
+		if (ret)
+			return ret;
 		break;
 	}
 	case ION_IOC_CLIENT_DEBUG_NAME:

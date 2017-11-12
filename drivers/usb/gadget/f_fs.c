@@ -1261,7 +1261,7 @@ static void ffs_data_clear(struct ffs_data *ffs)
 
 	
 	
-	pr_err("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
+	pr_err("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
 							ffs->gadget, ffs->flags);
 
 	
@@ -1270,7 +1270,7 @@ static void ffs_data_clear(struct ffs_data *ffs)
 
 	
 	if (ffs->gadget)
-		pr_err("%s: ffs:%p ffs->gadget= %p, ffs->flags= %lu\n",
+		pr_err("%s: ffs:%p ffs->gadget= %pK, ffs->flags= %lu\n",
 				__func__, ffs, ffs->gadget, ffs->flags);
 	BUG_ON(ffs->gadget);
 
