@@ -511,13 +511,13 @@ static void mtp_complete_out(struct usb_ep *ep, struct usb_request *req)
 
 	if (req->status != 0) {
 		dev->state = STATE_ERROR;
-		DBG(cdev, "%s: %p rx_idle status: %d\n", __func__, req, req->status);
+		DBG(cdev, "%s: %pK rx_idle status: %d\n", __func__, req, req->status);
 		mtp_req_put(dev, &dev->rx_idle, req);
 	} else if (dev->state == STATE_OFFLINE) {
-		DBG(cdev, "%s: %p rx_idle offlin: %d\n", __func__, req, req->status);
+		DBG(cdev, "%s: %pK rx_idle offlin: %d\n", __func__, req, req->status);
 		mtp_req_put(dev, &dev->rx_idle, req);
 	} else {
-		DBG(cdev, "%s: %p rx_done\n", __func__, req);
+		DBG(cdev, "%s: %pK rx_done\n", __func__, req);
 		mtp_req_put(dev, &dev->rx_done, req);
 	}
 	wake_up(&dev->read_wq);
@@ -545,7 +545,7 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	struct usb_ep *ep;
 	int i;
 
-	DBG(cdev, "create_bulk_endpoints dev: %p\n", dev);
+	DBG(cdev, "create_bulk_endpoints dev: %pK\n", dev);
 
 	ep = usb_ep_autoconfig(cdev->gadget, in_desc);
 	if (!ep) {
@@ -697,7 +697,7 @@ requeue_req:
 			DBG(cdev, "%s: queue request(%p) on %s\n", __func__, req, dev->ep_out->name);
 			ret = usb_ep_queue(dev->ep_out, req, GFP_ATOMIC);
 			if (ret < 0) {
-				INFO(cdev, "%s: failed to queue req %p (%d)\n", __func__, req, ret);
+				INFO(cdev, "%s: failed to queue req %pK (%d)\n", __func__, req, ret);
 				r = -EIO;
 				mtp_req_put(dev, &dev->rx_idle, req);
 				dev->read_count = 0;
@@ -713,7 +713,7 @@ requeue_req:
 
 		
 		if (dev->read_count > 0) {
-			DBG(cdev, "%s: read %llu bytes @ %p\n", __func__,
+			DBG(cdev, "%s: read %llu bytes @ %pK\n", __func__,
 				dev->read_count, dev->rx_req);
 
 			xfer = (dev->read_count < count) ? dev->read_count : count;
@@ -1021,7 +1021,7 @@ requeue_req:
 			DBG(cdev, "%s: queue request(%p) on %s\n", __func__, req, dev->ep_out->name);
 			ret = usb_ep_queue(dev->ep_out, req, GFP_ATOMIC);
 			if (ret < 0) {
-				INFO(cdev, "%s: failed to queue req %p (%d)\n", __func__, req, ret);
+				INFO(cdev, "%s: failed to queue req %pK (%d)\n", __func__, req, ret);
 				r = -EIO;
 				mtp_req_put(dev, &dev->rx_idle, req);
 				goto done;
@@ -1386,7 +1386,7 @@ static int mtp_release(struct inode *ip, struct file *fp)
 	
 	if (dev->state != STATE_OFFLINE) {
 		while ((req = mtp_req_get(dev, &dev->rx_done))) {
-			DBG(dev->cdev, "%s send %p from done to idle\n", __func__, req);
+			DBG(dev->cdev, "%s send %pK from done to idle\n", __func__, req);
 			mtp_req_put(dev, &dev->rx_idle, req);
 		}
 	}
@@ -1510,7 +1510,7 @@ mtp_function_bind(struct usb_configuration *c, struct usb_function *f)
 	int			ret;
 
 	dev->cdev = cdev;
-	DBG(cdev, "mtp_function_bind dev: %p\n", dev);
+	DBG(cdev, "mtp_function_bind dev: %pK\n", dev);
 
 	
 	id = usb_interface_id(c, f);

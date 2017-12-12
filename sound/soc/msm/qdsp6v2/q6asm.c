@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -38,8 +38,8 @@
 #include <sound/q6asm-v2.h>
 #include <sound/q6audio-v2.h>
 #include <sound/audio_cal_utils.h>
-#include <sound/msm-dts-eagle.h>
 #include <sound/adsp_err.h>
+#include <sound/compress_params.h>
 
 #undef pr_info
 #undef pr_err
@@ -369,12 +369,12 @@ static void config_debug_fs_write(struct audio_buffer *ab)
 }
 static void config_debug_fs_init(void)
 {
-	out_buffer = kmalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
+	out_buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
 	if (out_buffer == NULL) {
 		pr_err("%s: kmalloc() for out_buffer failed\n", __func__);
 		goto outbuf_fail;
 	}
-	in_buffer = kmalloc(IN_BUFFER_SIZE, GFP_KERNEL);
+	in_buffer = kzalloc(IN_BUFFER_SIZE, GFP_KERNEL);
 	if (in_buffer == NULL) {
 		pr_err("%s: kmalloc() for in_buffer failed\n", __func__);
 		goto inbuf_fail;
@@ -1208,15 +1208,16 @@ err:
 int q6asm_audio_client_buf_alloc(unsigned int dir,
 			struct audio_client *ac,
 			unsigned int bufsz,
-			unsigned int bufcnt)
+			uint32_t bufcnt)
 {
 	int cnt = 0;
 	int rc = 0;
 	struct audio_buffer *buf;
 	size_t len;
 
-	if (!(ac) || ((dir != IN) && (dir != OUT))) {
-		pr_err("%s: ac %p dir %d\n", __func__, ac, dir);
+	if (!(ac) || !(bufsz) || ((dir != IN) && (dir != OUT))) {
+		pr_err("%s: ac %p bufsz %d dir %d\n", __func__, ac, bufsz,
+			dir);
 		return -EINVAL;
 	}
 
@@ -1235,7 +1236,7 @@ int q6asm_audio_client_buf_alloc(unsigned int dir,
 			return 0;
 		}
 		mutex_lock(&ac->cmd_lock);
-		if (bufcnt > (LONG_MAX/sizeof(struct audio_buffer))) {
+		if (bufcnt > (U32_MAX/sizeof(struct audio_buffer))) {
 			pr_err("%s: Buffer size overflows", __func__);
 			mutex_unlock(&ac->cmd_lock);
 			goto fail;
@@ -2190,9 +2191,6 @@ static int __q6asm_open_read(struct audio_client *ac,
 	open.src_endpointype = ASM_END_POINT_DEVICE_MATRIX;
 
 	open.preprocopo_id = q6asm_get_asm_topology();
-	if ((open.preprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_DTS_HPX) ||
-	    (open.preprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_HPX_PLUS))
-		open.preprocopo_id = ASM_STREAM_POSTPROCOPO_ID_NONE;
 	open.bits_per_sample = bits_per_sample;
 	open.mode_flags = 0x0;
 
@@ -2592,10 +2590,6 @@ static int __q6asm_open_read_write(struct audio_client *ac, uint32_t rd_format,
 			      topology : open.postprocopo_id;
 	ac->topology = open.postprocopo_id;
 
-	/* For DTS EAGLE only, force 24 bit */
-	if ((open.postprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_DTS_HPX) ||
-	     (open.postprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_HPX_MASTER))
-		open.bits_per_sample = 24;
 
 	switch (wr_format) {
 	case FORMAT_LINEAR_PCM:
@@ -2775,7 +2769,8 @@ int q6asm_set_shared_circ_buff(struct audio_client *ac,
 			       int dir)
 {
 	struct audio_buffer *buf_circ;
-	int bytes_to_alloc, rc, len;
+	int bytes_to_alloc, rc;
+	size_t len;
 
 	buf_circ = kzalloc(sizeof(struct audio_buffer), GFP_KERNEL);
 
@@ -2794,7 +2789,7 @@ int q6asm_set_shared_circ_buff(struct audio_client *ac,
 	rc = msm_audio_ion_alloc("audio_client", &buf_circ->client,
 			&buf_circ->handle, bytes_to_alloc,
 			(ion_phys_addr_t *)&buf_circ->phys,
-			(size_t *)&len, &buf_circ->data);
+			&len, &buf_circ->data);
 
 	if (rc) {
 		pr_err("%s: Audio ION alloc is failed, rc = %d\n", __func__,
@@ -2836,7 +2831,8 @@ int q6asm_set_shared_pos_buff(struct audio_client *ac,
 			       int dir)
 {
 	struct audio_buffer *buf_pos = &ac->shared_pos_buf;
-	int len, rc;
+	int rc;
+	size_t len;
 	int bytes_to_alloc = sizeof(struct asm_shared_position_buffer);
 
 	mutex_lock(&ac->cmd_lock);
@@ -2845,7 +2841,7 @@ int q6asm_set_shared_pos_buff(struct audio_client *ac,
 
 	rc = msm_audio_ion_alloc("audio_client", &buf_pos->client,
 			&buf_pos->handle, bytes_to_alloc,
-			(ion_phys_addr_t *)&buf_pos->phys, (size_t *)&len,
+			(ion_phys_addr_t *)&buf_pos->phys, &len,
 			&buf_pos->data);
 
 	if (rc) {
@@ -4917,7 +4913,7 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 	struct asm_buffer_node *buffer_node = NULL;
 	int	rc = 0;
 	int    i = 0;
-	int	cmd_size = 0;
+	uint32_t cmd_size = 0;
 	uint32_t bufcnt_t;
 	uint32_t bufsz_t;
 
@@ -4939,9 +4935,24 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 		bufsz_t = PAGE_ALIGN(bufsz_t);
 	}
 
+	if (bufcnt_t > (UINT_MAX
+			- sizeof(struct avs_cmd_shared_mem_map_regions))
+			/ sizeof(struct avs_shared_map_region_payload)) {
+		pr_err("%s: Unsigned Integer Overflow. bufcnt_t = %u\n",
+				__func__, bufcnt_t);
+		return -EINVAL;
+	}
+
 	cmd_size = sizeof(struct avs_cmd_shared_mem_map_regions)
 			+ (sizeof(struct avs_shared_map_region_payload)
 							* bufcnt_t);
+
+
+	if (bufcnt > (UINT_MAX / sizeof(struct asm_buffer_node))) {
+		pr_err("%s: Unsigned Integer Overflow. bufcnt = %u\n",
+				__func__, bufcnt);
+		return -EINVAL;
+	}
 
 	buffer_node = kzalloc(sizeof(struct asm_buffer_node) * bufcnt,
 				GFP_KERNEL);
@@ -5235,213 +5246,6 @@ int q6asm_set_mute(struct audio_client *ac, int muteflag)
 	}
 	rc = 0;
 fail_cmd:
-	return rc;
-}
-
-int q6asm_dts_eagle_set(struct audio_client *ac, int param_id, uint32_t size,
-			void *data, struct param_outband *po, int m_id)
-{
-	int rc = 0, *ob_params = NULL;
-	uint32_t sz = sizeof(struct asm_dts_eagle_param) + (po ? 0 : size);
-	struct asm_dts_eagle_param *ad;
-
-	if (!ac || ac->apr == NULL || (size == 0) || !data) {
-		pr_err("DTS_EAGLE_ASM - %s: APR handle NULL, invalid size %u or pointer %p.\n",
-			__func__, size, data);
-		return -EINVAL;
-	}
-
-	ad = kzalloc(sz, GFP_KERNEL);
-	if (!ad) {
-		pr_err("DTS_EAGLE_ASM - %s: error allocating mem of size %u\n",
-			__func__, sz);
-		return -ENOMEM;
-	}
-	pr_debug("DTS_EAGLE_ASM - %s: ac %p param_id 0x%x size %u data %p m_id 0x%x\n",
-		__func__, ac, param_id, size, data, m_id);
-	q6asm_add_hdr_async(ac, &ad->hdr, sz, 1);
-	ad->hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS_V2;
-	ad->param.data_payload_addr_lsw = 0;
-	ad->param.data_payload_addr_msw = 0;
-
-	ad->param.mem_map_handle = 0;
-	ad->param.data_payload_size = size +
-					sizeof(struct asm_stream_param_data_v2);
-	ad->data.module_id = m_id;
-	ad->data.param_id = param_id;
-	ad->data.param_size = size;
-	ad->data.reserved = 0;
-	atomic_set(&ac->cmd_state, 1);
-
-	if (po) {
-		struct list_head *ptr, *next;
-		struct asm_buffer_node *node;
-		pr_debug("DTS_EAGLE_ASM - %s: using out of band memory (virtual %p, physical %lu)\n",
-			__func__, po->kvaddr, (long)po->paddr);
-		ad->param.data_payload_addr_lsw = lower_32_bits(po->paddr);
-		ad->param.data_payload_addr_msw = upper_32_bits(po->paddr);
-		list_for_each_safe(ptr, next, &ac->port[IN].mem_map_handle) {
-			node = list_entry(ptr, struct asm_buffer_node, list);
-			if (node->buf_phys_addr == po->paddr) {
-				ad->param.mem_map_handle = node->mmap_hdl;
-				break;
-			}
-		}
-		if (ad->param.mem_map_handle == 0) {
-			pr_err("DTS_EAGLE_ASM - %s: mem map handle not found\n",
-				__func__);
-			rc = -EINVAL;
-			goto fail_cmd;
-		}
-		/* check for integer overflow */
-		if (size > (UINT_MAX - APR_CMD_OB_HDR_SZ))
-			rc = -EINVAL;
-		if ((rc < 0) || (size + APR_CMD_OB_HDR_SZ > po->size)) {
-			pr_err("DTS_EAGLE_ASM - %s: ion alloc of size %zu too small for size requested %u\n",
-				__func__, po->size, size + APR_CMD_OB_HDR_SZ);
-			rc = -EINVAL;
-			goto fail_cmd;
-		}
-		ob_params = (int *)po->kvaddr;
-		*ob_params++ = m_id;
-		*ob_params++ = param_id;
-		*ob_params++ = size;
-		memcpy(ob_params, data, size);
-	} else {
-		pr_debug("DTS_EAGLE_ASM - %s: using in band\n", __func__);
-		memcpy(((char *)ad) + sizeof(struct asm_dts_eagle_param),
-			data, size);
-	}
-	rc = apr_send_pkt(ac->apr, (uint32_t *)ad);
-	if (rc < 0) {
-		pr_err("DTS_EAGLE_ASM - %s: set-params send failed paramid[0x%x]\n",
-			__func__, ad->data.param_id);
-		rc = -EINVAL;
-		goto fail_cmd;
-	}
-
-	rc = wait_event_timeout(ac->cmd_wait,
-			(atomic_read(&ac->cmd_state) <= 0), 1*HZ);
-	if (!rc) {
-		pr_err("DTS_EAGLE_ASM - %s: timeout, set-params paramid[0x%x]\n",
-			__func__, ad->data.param_id);
-		rc = -EINVAL;
-		goto fail_cmd;
-	}
-	rc = 0;
-fail_cmd:
-	kfree(ad);
-	return rc;
-}
-
-int q6asm_dts_eagle_get(struct audio_client *ac, int param_id, uint32_t size,
-			void *data, struct param_outband *po, int m_id)
-{
-	struct asm_dts_eagle_param_get *ad;
-	int rc = 0, *ob_params = NULL;
-	uint32_t sz = sizeof(struct asm_dts_eagle_param) + APR_CMD_GET_HDR_SZ +
-		 (po ? 0 : size);
-
-	if (!ac || ac->apr == NULL || (size == 0) || !data) {
-		pr_err("DTS_EAGLE_ASM - %s: APR handle NULL, invalid size %u or pointer %p\n",
-			__func__, size, data);
-		return -EINVAL;
-	}
-	ad = kzalloc(sz, GFP_KERNEL);
-	if (!ad) {
-		pr_err("DTS_EAGLE_ASM - %s: error allocating memory of size %u\n",
-			__func__, sz);
-		return -ENOMEM;
-	}
-	pr_debug("DTS_EAGLE_ASM - %s: ac %p param_id 0x%x size %u data %p m_id 0x%x\n",
-		__func__, ac, param_id, size, data, m_id);
-	q6asm_add_hdr(ac, &ad->hdr, sz, TRUE);
-	ad->hdr.opcode = ASM_STREAM_CMD_GET_PP_PARAMS_V2;
-	ad->param.data_payload_addr_lsw = 0;
-	ad->param.data_payload_addr_msw = 0;
-	ad->param.mem_map_handle = 0;
-	ad->param.module_id = m_id;
-	ad->param.param_id = param_id;
-	ad->param.param_max_size = size + APR_CMD_GET_HDR_SZ;
-	ad->param.reserved = 0;
-	atomic_set(&ac->cmd_state, 1);
-
-	generic_get_data = kzalloc(size + sizeof(struct generic_get_data_),
-				   GFP_KERNEL);
-	if (!generic_get_data) {
-		pr_err("DTS_EAGLE_ASM - %s: error allocating mem of size %u\n",
-			__func__, size);
-		rc = -ENOMEM;
-		goto fail_cmd;
-	}
-
-	if (po) {
-		struct list_head *ptr, *next;
-		struct asm_buffer_node *node;
-		pr_debug("DTS_EAGLE_ASM - %s: using out of band memory (virtual %p, physical %lu)\n",
-			 __func__, po->kvaddr, (long)po->paddr);
-		ad->param.data_payload_addr_lsw = lower_32_bits(po->paddr);
-		ad->param.data_payload_addr_msw = upper_32_bits(po->paddr);
-		list_for_each_safe(ptr, next, &ac->port[IN].mem_map_handle) {
-			node = list_entry(ptr, struct asm_buffer_node, list);
-			if (node->buf_phys_addr == po->paddr) {
-				ad->param.mem_map_handle = node->mmap_hdl;
-				break;
-			}
-		}
-		if (ad->param.mem_map_handle == 0) {
-			pr_err("DTS_EAGLE_ASM - %s: mem map handle not found\n",
-				__func__);
-			rc = -EINVAL;
-			goto fail_cmd;
-		}
-		/* check for integer overflow */
-		if (size > (UINT_MAX - APR_CMD_OB_HDR_SZ))
-			rc = -EINVAL;
-		if ((rc < 0) || (size + APR_CMD_OB_HDR_SZ > po->size)) {
-			pr_err("DTS_EAGLE_ASM - %s: ion alloc of size %zu too small for size requested %u\n",
-				__func__, po->size, size + APR_CMD_OB_HDR_SZ);
-			rc = -EINVAL;
-			goto fail_cmd;
-		}
-		ob_params = (int *)po->kvaddr;
-		*ob_params++ = m_id;
-		*ob_params++ = param_id;
-		*ob_params++ = size;
-		generic_get_data->is_inband = 0;
-	} else {
-		pr_debug("DTS_EAGLE_ASM - %s: using in band\n", __func__);
-		generic_get_data->is_inband = 1;
-	}
-
-	rc = apr_send_pkt(ac->apr, (uint32_t *)ad);
-	if (rc < 0) {
-		pr_err("DTS_EAGLE_ASM - %s: Commmand 0x%x failed\n", __func__,
-			ad->hdr.opcode);
-		goto fail_cmd;
-	}
-
-	rc = wait_event_timeout(ac->cmd_wait,
-			(atomic_read(&ac->cmd_state) <= 0), 1*HZ);
-	if (!rc) {
-		pr_err("DTS_EAGLE_ASM - %s: timeout in get\n",
-			__func__);
-		rc = -EINVAL;
-		goto fail_cmd;
-	}
-
-	if (generic_get_data->valid) {
-		rc = 0;
-		memcpy(data, po ? ob_params : generic_get_data->ints, size);
-	} else {
-		rc = -EINVAL;
-		pr_err("DTS_EAGLE_ASM - %s: EAGLE get params problem getting data - check callback error value\n",
-			__func__);
-	}
-fail_cmd:
-	kfree(ad);
-	kfree(generic_get_data);
-	generic_get_data = NULL;
 	return rc;
 }
 

@@ -590,7 +590,8 @@ static const char *compat_hwcap_str[] = {
 	"idivt",
 	"vfpd32",
 	"lpae",
-	"evtstrm"
+	"evtstrm",
+	NULL
 };
 #endif /* CONFIG_COMPAT */
 
@@ -648,6 +649,11 @@ static int c_show(struct seq_file *m, void *v)
 	}
 	seq_printf(m, "min_vddcx\t: %d\n", Get_min_cx());
 	seq_printf(m, "min_vddmx\t: %d\n", Get_min_mx());
+
+	if (!arch_read_hardware_id)
+		seq_printf(m, "Hardware\t: %s\n", machine_name);
+	else
+		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
 
 	if (!arch_read_hardware_id)
 		seq_printf(m, "Hardware\t: %s\n", machine_name);

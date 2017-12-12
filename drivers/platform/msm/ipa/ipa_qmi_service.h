@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -57,7 +57,11 @@ struct rmnet_mux_val {
 	uint32_t  hdr_hdl;
 };
 
-int ipa_qmi_service_init(bool load_uc, uint32_t wan_platform_type);
+void ipa_qmi_init(void);
+
+void ipa_qmi_cleanup(void);
+
+int ipa_qmi_service_init(uint32_t wan_platform_type);
 void ipa_qmi_service_exit(void);
 
 /* sending filter-install-request to modem*/
