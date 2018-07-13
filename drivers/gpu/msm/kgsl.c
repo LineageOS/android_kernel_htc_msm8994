@@ -42,6 +42,7 @@
 #include "kgsl_sync.h"
 #include "adreno.h"
 #include "kgsl_compat.h"
+#include "kgsl_htc.h"
 
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "kgsl."
@@ -434,6 +435,7 @@ kgsl_mem_entry_attach_process(struct kgsl_mem_entry *entry,
 
 	entry->id = id;
 	entry->priv = process;
+	entry->memdesc.private = process;
 
 	spin_lock(&process->mem_lock);
 	ret = kgsl_mem_entry_track_gpuaddr(process, entry);
@@ -569,11 +571,14 @@ int kgsl_context_init(struct kgsl_device_private *dev_priv,
 	}
 
 	if (id < 0) {
-		if (id == -ENOSPC)
+		if (id == -ENOSPC) {
 			KGSL_DRV_INFO(device,
 				"cannot have more than %zu contexts due to memstore limitation\n",
 				KGSL_MEMSTORE_MAX);
-
+			write_lock(&device->context_lock);
+			kgsl_dump_contextpid_locked(&dev_priv->device->context_idr);
+			write_unlock(&device->context_lock);
+		}
 		return id;
 	}
 
@@ -604,6 +609,7 @@ out:
 	if (ret) {
 		write_lock(&device->context_lock);
 		idr_remove(&dev_priv->device->context_idr, id);
+		kgsl_dump_contextpid_locked(&dev_priv->device->context_idr);
 		write_unlock(&device->context_lock);
 	}
 
@@ -2897,8 +2903,7 @@ static int kgsl_setup_useraddr(struct kgsl_mem_entry *entry,
 	struct vm_area_struct *vma = NULL;
 	int ret;
 
-	if (param->len == 0 || param->offset != 0
-		|| param->hostptr == 0
+	if (param->offset != 0 || param->hostptr == 0
 		|| !KGSL_IS_PAGE_ALIGNED(param->hostptr)
 		|| !KGSL_IS_PAGE_ALIGNED(param->len))
 		return -EINVAL;
@@ -3537,6 +3542,7 @@ _gpumem_alloc(struct kgsl_device_private *dev_priv,
 	struct kgsl_process_private *private = dev_priv->process_priv;
 	struct kgsl_mem_entry *entry;
 	int align;
+	struct kgsl_memdesc *memdesc = NULL;
 
 	/*
 	 * Mask off unknown flags from userspace. This way the caller can
@@ -3572,12 +3578,15 @@ _gpumem_alloc(struct kgsl_device_private *dev_priv,
 	flags = kgsl_filter_cachemode(flags);
 
 	entry = kgsl_mem_entry_create();
+	memdesc = &entry->memdesc;
+
 	if (entry == NULL)
 		return -ENOMEM;
 
 	if (kgsl_mmu_get_mmutype() == KGSL_MMU_TYPE_IOMMU)
 		entry->memdesc.priv |= KGSL_MEMDESC_GUARD_PAGE;
 
+	memdesc->private = private;
 	result = kgsl_allocate_user(dev_priv->device, &entry->memdesc,
 				private->pagetable, size, flags);
 	if (result != 0)
@@ -4742,6 +4751,8 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 	device->pwrctrl.pm_qos_req_dma.type = PM_QOS_REQ_AFFINE_IRQ;
 	device->pwrctrl.pm_qos_req_dma.irq = device->pwrctrl.interrupt_num;
 
+	INIT_LIST_HEAD(&device->pwrctrl.pm_qos_req_dma.node.prio_list);
+	INIT_LIST_HEAD(&device->pwrctrl.pm_qos_req_dma.node.node_list);
 #endif
 	pm_qos_add_request(&device->pwrctrl.pm_qos_req_dma,
 				PM_QOS_CPU_DMA_LATENCY,
@@ -4755,6 +4766,9 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 
 	/* Initialize common sysfs entries */
 	kgsl_pwrctrl_init_sysfs(device);
+
+	/* Initialize htc feature */
+	kgsl_device_htc_init(device);
 
 	dev_info(device->dev, "Initialized %s: mmu=%s\n", device->name,
 		kgsl_mmu_enabled() ? "on" : "off");
@@ -4906,6 +4920,8 @@ static int __init kgsl_core_init(void)
 	}
 
 	kgsl_memfree_init();
+
+	kgsl_driver_htc_init(&kgsl_driver.priv);
 
 	return 0;
 

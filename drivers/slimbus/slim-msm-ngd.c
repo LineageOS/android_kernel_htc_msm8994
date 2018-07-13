@@ -36,6 +36,14 @@
 #define NGD_BASE_V1(r)	(((r) % 2) ? 0x800 : 0xA00)
 #define NGD_BASE_V2(r)	(((r) % 2) ? 0x1000 : 0x2000)
 #define NGD_BASE(r, v) ((v) ? NGD_BASE_V2(r) : NGD_BASE_V1(r))
+
+//htc audio ++
+#undef pr_info
+#undef pr_err
+#define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
+
 /* NGD (Non-ported Generic Device) registers */
 enum ngd_reg {
 	NGD_CFG		= 0x0,
@@ -1135,6 +1143,10 @@ static int ngd_slim_power_up(struct msm_slim_ctrl *dev, bool mdm_restart)
 	timeout = wait_for_completion_timeout(&dev->reconf, HZ);
 	if (!timeout) {
 		SLIM_ERR(dev, "Failed to receive master capability\n");
+#ifdef CONFIG_HTC_DEBUG_DSP
+		pr_info("%s:trigger ramdump to keep status\n",__func__);
+		BUG();
+#endif
 		return -ETIMEDOUT;
 	}
 	/* mutliple transactions waiting on slimbus to power up? */

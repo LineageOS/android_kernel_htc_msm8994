@@ -339,6 +339,9 @@ struct msm_fb_data_type {
 	enum dyn_mode_switch_state switch_state;
 	u32 switch_new_mode;
 	struct mutex switch_lock;
+
+	/* HTC: store last brightness value for backlight calibration */
+	u32 last_bri;
 };
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)

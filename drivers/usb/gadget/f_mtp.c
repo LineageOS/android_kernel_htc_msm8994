@@ -38,6 +38,10 @@
 
 #define MTP_BULK_BUFFER_SIZE       16384
 #define INTR_BUFFER_SIZE           28
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+#define MTP_THREAD_UNSUPPORT	0
+#define MTP_THREAD_SUPPORT	1
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 /* String IDs */
 #define INTERFACE_STRING_INDEX	0
@@ -51,7 +55,9 @@
 
 /* number of tx and rx requests to allocate */
 #define MTP_TX_REQ_MAX 8
-#define RX_REQ_MAX 2
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+#define MTP_RX_REQ_MAX 8
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 #define INTR_REQ_MAX 5
 
 /* ID for Microsoft MTP OS String */
@@ -66,6 +72,11 @@
 /* constants for device status */
 #define MTP_RESPONSE_OK             0x2001
 #define MTP_RESPONSE_DEVICE_BUSY    0x2019
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+#include <mach/perflock.h>
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 
 unsigned int mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
 module_param(mtp_rx_req_len, uint, S_IRUGO | S_IWUSR);
@@ -75,6 +86,9 @@ module_param(mtp_tx_req_len, uint, S_IRUGO | S_IWUSR);
 
 unsigned int mtp_tx_reqs = MTP_TX_REQ_MAX;
 module_param(mtp_tx_reqs, uint, S_IRUGO | S_IWUSR);
+/*++ 2014/10/21, USB Team, PCN00019 ++*/
+static int htc_mtp_open_state;
+/*-- 2014/10/21, USB Team, PCN00019 --*/
 
 static const char mtp_shortname[] = "mtp_usb";
 
@@ -89,6 +103,22 @@ struct mtp_dev {
 
 	int state;
 
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	atomic_t read_excl;
+	atomic_t write_excl;
+
+	/* the request we're currently reading from */
+	struct usb_request *rx_req;
+	unsigned char *read_buf;
+	uint64_t read_count;
+
+	struct list_head rx_idle;
+	struct list_head rx_done;
+
+	struct timeval st0;
+	struct timeval st1;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
+
 	/* synchronize access to our device file */
 	atomic_t open_excl;
 	/* to enforce only one ioctl at a time */
@@ -100,8 +130,10 @@ struct mtp_dev {
 	wait_queue_head_t read_wq;
 	wait_queue_head_t write_wq;
 	wait_queue_head_t intr_wq;
-	struct usb_request *rx_req[RX_REQ_MAX];
-	int rx_done;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	/*struct usb_request *rx_req[RX_REQ_MAX];*/
+	/*int rx_done;*/
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 	/* for processing MTP_SEND_FILE, MTP_RECEIVE_FILE and
 	 * MTP_SEND_FILE_WITH_HEADER ioctls on a work queue
@@ -116,6 +148,16 @@ struct mtp_dev {
 	uint16_t xfer_command;
 	uint32_t xfer_transaction_id;
 	int xfer_result;
+
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+	struct work_struct release_perflock_work;
+	bool mtp_perf_lock_on;
+	struct perf_lock perf_lock;
+	struct timer_list perf_timer;
+	unsigned long timer_expired;
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 };
 
 static struct usb_interface_descriptor mtp_interface_desc = {
@@ -358,6 +400,60 @@ struct mtp_data_header {
 /* temporary variable used between mtp_open() and mtp_gadget_bind() */
 static struct mtp_dev *_mtp_dev;
 
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+
+static void mtp_setup_perflock(bool mtp_perf_lock_on)
+{
+	struct mtp_dev *dev = _mtp_dev;
+	dev->mtp_perf_lock_on = mtp_perf_lock_on;
+
+	/* reset the timer */
+	del_timer(&dev->perf_timer);
+	if (mtp_perf_lock_on) {
+		if (!is_perf_lock_active(&dev->perf_lock)) {
+			printk(KERN_INFO "[USB][MTP] %s, perf on\n", __func__);
+			perf_lock(&dev->perf_lock);
+		}
+	} else {
+		if (is_perf_lock_active(&dev->perf_lock)) {
+			printk(KERN_INFO "[USB][MTP] %s, perf off\n", __func__);
+			perf_unlock(&dev->perf_lock);
+		}
+	}
+}
+
+static __maybe_unused void release_perflock_work_func(struct work_struct *data)
+{
+	mtp_setup_perflock(false);
+}
+
+/* 15ms per file */
+#define MTP_QOS_N_RATIO     15
+#define MTP_TRANSFER_EXPIRED    (jiffies + msecs_to_jiffies(5000))
+static void mtp_qos_enable(int qos_n)
+{
+	struct mtp_dev *dev = _mtp_dev;
+
+	if (qos_n) {
+		mtp_setup_perflock(true);
+		dev->timer_expired = qos_n * MTP_QOS_N_RATIO;
+		if (dev->timer_expired < 5000)
+			dev->timer_expired = 5000;
+		mod_timer(&dev->perf_timer,
+				jiffies + msecs_to_jiffies(dev->timer_expired));
+	} else
+		mtp_setup_perflock(false);
+}
+
+static __maybe_unused void mtp_perf_lock_disable(unsigned long data)
+{
+	struct mtp_dev *dev = _mtp_dev;
+	schedule_work(&dev->release_perflock_work);
+}
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
+
 static inline struct mtp_dev *func_to_mtp(struct usb_function *f)
 {
 	return container_of(f, struct mtp_dev, function);
@@ -446,11 +542,21 @@ static void mtp_complete_in(struct usb_ep *ep, struct usb_request *req)
 static void mtp_complete_out(struct usb_ep *ep, struct usb_request *req)
 {
 	struct mtp_dev *dev = _mtp_dev;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
+	struct usb_composite_dev *cdev = dev->cdev;
 
-	dev->rx_done = 1;
-	if (req->status != 0)
+	if (req->status != 0) {
 		dev->state = STATE_ERROR;
-
+		DBG(cdev, "%s: %p rx_idle status: %d\n", __func__, req, req->status);
+		mtp_req_put(dev, &dev->rx_idle, req);
+	} else if (dev->state == STATE_OFFLINE) {
+		DBG(cdev, "%s: %p rx_idle offlin: %d\n", __func__, req, req->status);
+		mtp_req_put(dev, &dev->rx_idle, req);
+	} else {
+		DBG(cdev, "%s: %p rx_done\n", __func__, req);
+		mtp_req_put(dev, &dev->rx_done, req);
+	}
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	wake_up(&dev->read_wq);
 }
 
@@ -534,19 +640,21 @@ retry_tx_alloc:
 	if (mtp_rx_req_len % 1024)
 		mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
 
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 retry_rx_alloc:
-	for (i = 0; i < RX_REQ_MAX; i++) {
+	for (i = 0; i < MTP_RX_REQ_MAX; i++) {
 		req = mtp_request_new(dev->ep_out, mtp_rx_req_len);
 		if (!req) {
 			if (mtp_rx_req_len <= MTP_BULK_BUFFER_SIZE)
 				goto fail;
-			for (--i; i >= 0; i--)
-				mtp_request_free(dev->rx_req[i], dev->ep_out);
+			while ((req = mtp_req_get(dev, &dev->rx_idle)))
+				mtp_request_free(req, dev->ep_out);
 			mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
 			goto retry_rx_alloc;
 		}
 		req->complete = mtp_complete_out;
-		dev->rx_req[i] = req;
+		mtp_req_put(dev, &dev->rx_idle, req);
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	}
 	for (i = 0; i < INTR_REQ_MAX; i++) {
 		req = mtp_request_new(dev->ep_intr, INTR_BUFFER_SIZE);
@@ -569,17 +677,15 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	struct mtp_dev *dev = fp->private_data;
 	struct usb_composite_dev *cdev = dev->cdev;
 	struct usb_request *req;
-	ssize_t r = count;
-	unsigned xfer;
-	int len;
-	int ret = 0;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	int r = 0, xfer;
+	int ret = 0, file_xfer_zlp_flag = 0;
 
 	DBG(cdev, "mtp_read(%zu)\n", count);
 
-	len = ALIGN(count, dev->ep_out->maxpacket);
-
-	if (len > mtp_rx_req_len)
-		return -EINVAL;
+	if (mtp_lock(&dev->read_excl))
+		return -EBUSY;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 	/* we will block until we're online */
 	DBG(cdev, "mtp_read: waiting for online state\n");
@@ -594,53 +700,132 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 		/* report cancelation to userspace */
 		dev->state = STATE_READY;
 		spin_unlock_irq(&dev->lock);
-		return -ECANCELED;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+		r = -ECANCELED;
+		goto done;
+	}
+	if (dev->state == STATE_OFFLINE) {
+		spin_unlock_irq(&dev->lock);
+		r = -ENODEV;
+		goto done;
 	}
 	dev->state = STATE_BUSY;
 	spin_unlock_irq(&dev->lock);
 
+	/* We should have best peformance while transferring huge packet */
+	if (count > MTP_BULK_BUFFER_SIZE) {
+		file_xfer_zlp_flag = 1;
+	/*Enable MTP QoS*/
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+		mtp_qos_enable(1);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
+	}
+/*-- 2014/11/20, USB Team, PCN00042 --*/
+
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	while (count > 0) {
+		if (dev->state == STATE_CANCELED) {
+/*++ 2014/12/29, USB Team, PCN00062 ++*/
+			usb_ep_nuke(dev->ep_out);
+/*-- 2014/12/29, USB Team, PCN00062 --*/
+			while ((req = mtp_req_get(dev, &dev->rx_done)))
+				mtp_req_put(dev, &dev->rx_idle, req);
+			dev->read_count = 0;
+			r = -ECANCELED;
+			break;
+		} else if (unlikely(dev->state == STATE_OFFLINE)) {
+			dev->read_count = 0;
+			r = -EIO;
+			goto done;
+		}
+
+		/* if we have idle read requests, get them queued */
+		while ((req = mtp_req_get(dev, &dev->rx_idle))) {
 requeue_req:
-	/* queue a request */
-	req = dev->rx_req[0];
-	req->length = len;
-	dev->rx_done = 0;
-	ret = usb_ep_queue(dev->ep_out, req, GFP_KERNEL);
-	if (ret < 0) {
-		r = -EIO;
-		goto done;
-	} else {
-		DBG(cdev, "rx %p queue\n", req);
-	}
+			#if 0
+			req->length = dev->maxsize?dev->maxsize:512;
+			#endif
+			req->length = MTP_BULK_BUFFER_SIZE;
+			DBG(cdev, "%s: queue request(%p) on %s\n", __func__, req, dev->ep_out->name);
+			ret = usb_ep_queue(dev->ep_out, req, GFP_ATOMIC);
+			if (ret < 0) {
+				INFO(cdev, "%s: failed to queue req %p (%d)\n", __func__, req, ret);
+				r = -EIO;
+				mtp_req_put(dev, &dev->rx_idle, req);
+				dev->read_count = 0;
+				goto done;
+			}
+			if (dev->state == STATE_OFFLINE || dev->state == STATE_ERROR) {
+				printk(KERN_INFO "[USB][MTP] hit potential WDT issue (%d)\n", dev->state);
+				dev->read_count = 0;
+				r = -EIO;
+				goto done;
+			}
+		}
 
-	/* wait for a request to complete */
-	ret = wait_event_interruptible(dev->read_wq,
-				dev->rx_done || dev->state != STATE_BUSY);
-	if (dev->state == STATE_CANCELED) {
-		r = -ECANCELED;
-		if (!dev->rx_done)
-			usb_ep_dequeue(dev->ep_out, req);
-		spin_lock_irq(&dev->lock);
-		dev->state = STATE_CANCELED;
-		spin_unlock_irq(&dev->lock);
-		goto done;
-	}
-	if (ret < 0) {
-		r = ret;
-		usb_ep_dequeue(dev->ep_out, req);
-		goto done;
-	}
-	if (dev->state == STATE_BUSY) {
-		/* If we got a 0-len packet, throw it back and try again. */
-		if (req->actual == 0)
-			goto requeue_req;
+		/* if we have data pending, give it to userspace */
+		if (dev->read_count > 0) {
+			DBG(cdev, "%s: read %llu bytes @ %p\n", __func__,
+				dev->read_count, dev->rx_req);
 
-		DBG(cdev, "rx %p %d\n", req, req->actual);
-		xfer = (req->actual < count) ? req->actual : count;
-		r = xfer;
-		if (copy_to_user(buf, req->buf, xfer))
-			r = -EFAULT;
-	} else
-		r = -EIO;
+			xfer = (dev->read_count < count) ? dev->read_count : count;
+
+			if (copy_to_user(buf, dev->read_buf, xfer)) {
+				r = -EFAULT;
+				break;
+			}
+			dev->read_buf += xfer;
+			dev->read_count -= xfer;
+			buf += xfer;
+			count -= xfer;
+			r += xfer;
+
+			/* if we've emptied the buffer, release the request */
+			if (dev->read_count == 0 && dev->rx_req) {
+				mtp_req_put(dev, &dev->rx_idle, dev->rx_req);
+				dev->rx_req = 0;
+			}
+
+			/* short packet found */
+			if (xfer < MTP_BULK_BUFFER_SIZE) {
+				dev->read_count = 0;
+				break;
+			}
+			continue;
+		}
+
+		/* wait for a request to complete */
+		req = 0;
+		ret = wait_event_interruptible(dev->read_wq,
+				((req = mtp_req_get(dev, &dev->rx_done))
+				 || dev->state != STATE_BUSY));
+
+		if (req != 0) {
+			/* if we got a 0-len one we need to put it back into
+			 ** service.  if we made it the current read req we'd
+			 ** be stuck forever
+			 */
+			if (req->actual == 0) {
+				if (file_xfer_zlp_flag == 0)
+					goto requeue_req;
+					dev->rx_req = req;
+					mtp_req_put(dev, &dev->rx_idle, dev->rx_req);
+					INFO(cdev, "%s: got ZLP while file xfer.\n", __func__);
+					break;
+				}
+				dev->rx_req = req;
+				dev->read_count = req->actual;
+				dev->read_buf = req->buf;
+		}
+
+		if (ret < 0) {
+			r = ret;
+			break;
+		}
+	}
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 done:
 	spin_lock_irq(&dev->lock);
@@ -649,8 +834,11 @@ done:
 	else if (dev->state != STATE_OFFLINE)
 		dev->state = STATE_READY;
 	spin_unlock_irq(&dev->lock);
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	mtp_unlock(&dev->read_excl);
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
-	DBG(cdev, "mtp_read returning %zd\n", r);
+	DBG(cdev, "mtp_read returning %d\n", r);
 	return r;
 }
 
@@ -693,7 +881,9 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 			sendZLP = 0;
 
 		if (dev->state != STATE_BUSY) {
-			DBG(cdev, "mtp_write dev->error\n");
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+			INFO(cdev, "mtp_write dev->error, state=%d\n", dev->state);
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 			r = -EIO;
 			break;
 		}
@@ -720,7 +910,9 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 		req->length = xfer;
 		ret = usb_ep_queue(dev->ep_in, req, GFP_KERNEL);
 		if (ret < 0) {
-			DBG(cdev, "mtp_write: xfer error %d\n", ret);
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+			INFO(cdev, "mtp_write: xfer error %d\n", ret);
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 			r = -EIO;
 			break;
 		}
@@ -844,6 +1036,12 @@ static void send_file_work(struct work_struct *data)
 	if (req)
 		mtp_req_put(dev, &dev->tx_idle, req);
 
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+	mod_timer(&dev->perf_timer, MTP_TRANSFER_EXPIRED);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
+
 	DBG(cdev, "send_file_work returning %d\n", r);
 	/* write the result */
 	dev->xfer_result = r;
@@ -856,93 +1054,145 @@ static void receive_file_work(struct work_struct *data)
 	struct mtp_dev *dev = container_of(data, struct mtp_dev,
 						receive_file_work);
 	struct usb_composite_dev *cdev = dev->cdev;
-	struct usb_request *read_req = NULL, *write_req = NULL;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	struct usb_request *req = NULL;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	struct file *filp;
 	loff_t offset;
 	int64_t count;
-	int ret, cur_buf = 0;
-	int r = 0;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	int ret;
+	int r = 0, xfer, times = 0, file_xfer_zlp_flag = 0;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 	/* read our parameters */
 	smp_rmb();
 	filp = dev->xfer_file;
 	offset = dev->xfer_file_offset;
 	count = dev->xfer_file_length;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	dev->read_count = 0;
 
 	DBG(cdev, "receive_file_work(%lld)\n", count);
-	if (!IS_ALIGNED(count, dev->ep_out->maxpacket))
-		DBG(cdev, "%s- count(%lld) not multiple of mtu(%d)\n", __func__,
-						count, dev->ep_out->maxpacket);
 
-	while (count > 0 || write_req) {
-		if (count > 0) {
-			/* queue a request */
-			read_req = dev->rx_req[cur_buf];
-			cur_buf = (cur_buf + 1) % RX_REQ_MAX;
+	if (count == 0xFFFFFFFF)
+		file_xfer_zlp_flag = 1;
 
-			/* some h/w expects size to be aligned to ep's MTU */
-			read_req->length = mtp_rx_req_len;
+	while (count > 0) {
+		if (dev->state == STATE_CANCELED ) {
+/*++ 2014/12/29, USB Team, PCN00062 ++*/
+			usb_ep_nuke(dev->ep_out);
+/*-- 2014/12/29, USB Team, PCN00062 --*/
+			while ((req = mtp_req_get(dev, &dev->rx_done)))
+				mtp_req_put(dev, &dev->rx_idle, req);
+			r = -ECANCELED;
+			times = 0;
+			break;
+		} else if (dev->state == STATE_OFFLINE) {
+			r = -EIO;
+			goto done;
+		}
 
-			dev->rx_done = 0;
-			ret = usb_ep_queue(dev->ep_out, read_req, GFP_KERNEL);
+		/* if we have idle read requests, get them queued */
+		while ((req = mtp_req_get(dev, &dev->rx_idle))) {
+requeue_req:
+			#if 0
+			req->length = dev->maxsize?dev->maxsize:512;
+			#endif
+			req->length = MTP_BULK_BUFFER_SIZE;
+			DBG(cdev, "%s: queue request(%p) on %s\n", __func__, req, dev->ep_out->name);
+			ret = usb_ep_queue(dev->ep_out, req, GFP_ATOMIC);
 			if (ret < 0) {
+				INFO(cdev, "%s: failed to queue req %p (%d)\n", __func__, req, ret);
 				r = -EIO;
-				if (dev->state != STATE_OFFLINE)
-					dev->state = STATE_ERROR;
-				break;
+				mtp_req_put(dev, &dev->rx_idle, req);
+				goto done;
 			}
 		}
 
-		if (write_req) {
-			DBG(cdev, "rx %p %d\n", write_req, write_req->actual);
-			ret = vfs_write(filp, write_req->buf, write_req->actual,
+		DBG(cdev, "%s: read %llu bytes\n", __func__, dev->read_count);
+		/* if we have data pending, give it to userspace */
+		if (dev->read_count > 0) {
+			xfer = (dev->read_count < count) ? dev->read_count : count;
+
+			ret = vfs_write(filp, dev->read_buf, xfer,
 				&offset);
 			DBG(cdev, "vfs_write %d\n", ret);
-			if (ret != write_req->actual) {
+			if (ret != xfer) {
 				r = -EIO;
+				INFO(cdev, "%s(%d) vfs_write error, ret:%d\n",__func__, __LINE__, ret);
 				if (dev->state != STATE_OFFLINE)
 					dev->state = STATE_ERROR;
 				break;
 			}
-			write_req = NULL;
-		}
+			dev->read_buf += xfer;
+			dev->read_count -= xfer;
 
-		if (read_req) {
-			/* wait for our last read to complete */
-			ret = wait_event_interruptible(dev->read_wq,
-				dev->rx_done || dev->state != STATE_BUSY);
-			if (dev->state == STATE_CANCELED
-					|| dev->state == STATE_OFFLINE) {
-				if (dev->state == STATE_OFFLINE)
-					r = -EIO;
-				else
-					r = -ECANCELED;
-				if (!dev->rx_done)
-					usb_ep_dequeue(dev->ep_out, read_req);
-				break;
+			if(unlikely(dev->state == STATE_OFFLINE)) {
+				r = -EIO;
+				goto done;
 			}
-			/* Check if we aligned the size due to MTU constraint */
-			if (count < read_req->length)
-				read_req->actual = (read_req->actual > count ?
-						count : read_req->actual);
 			/* if xfer_file_length is 0xFFFFFFFF, then we read until
 			 * we get a zero length packet
 			 */
-			if (count != 0xFFFFFFFF)
-				count -= read_req->actual;
-			if (read_req->actual < read_req->length) {
-				/*
-				 * short packet is used to signal EOF for
-				 * sizes > 4 gig
-				 */
-				DBG(cdev, "got short packet\n");
-				count = 0;
+			if (file_xfer_zlp_flag == 0)
+				count -= xfer;
+
+			/* if we've emptied the buffer, release the request */
+			if (dev->read_count == 0 && dev->rx_req) {
+				mtp_req_put(dev, &dev->rx_idle, dev->rx_req);
+				dev->rx_req = 0;
 			}
 
-			write_req = read_req;
-			read_req = NULL;
+			/* short packet found */
+			if (xfer < MTP_BULK_BUFFER_SIZE) {
+				break;
+			}
+			continue;
+		}
+
+		/* wait for a request to complete */
+		req = 0;
+		ret = wait_event_interruptible(dev->read_wq,
+				((req = mtp_req_get(dev, &dev->rx_done))
+				 || dev->state != STATE_BUSY));
+
+		if (req != 0) {
+			/* if we got a 0-len one we need to put it back into
+			 ** service.  if we made it the current read req we'd
+			 ** be stuck forever
+				 */
+			if (req->actual == 0) {
+				if (file_xfer_zlp_flag == 0)
+					goto requeue_req;
+
+				dev->rx_req = req;
+				mtp_req_put(dev, &dev->rx_idle, dev->rx_req);
+				INFO(cdev, "%s: got ZLP while file xfer.\n", __func__);
+				break;
+			}
+
+			dev->rx_req = req;
+			dev->read_count = req->actual;
+			dev->read_buf = req->buf;
+		}
+
+		if (ret < 0) {
+			INFO(cdev, "%s: wait_event_interruptible ret = %d\n", __func__, ret);
+			r = ret;
+			break;
 		}
 	}
+
+done:
+	DBG(cdev, "receive_file_work returning %d\n", r);
+
+/*-- 2014/11/20, USB Team, PCN00042 --*/
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+	mod_timer(&dev->perf_timer, MTP_TRANSFER_EXPIRED);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 
 	DBG(cdev, "receive_file_work returning %d\n", r);
 	/* write the result */
@@ -1065,11 +1315,15 @@ static long mtp_ioctl(struct file *fp, unsigned code, unsigned long value)
 	struct mtp_file_range	mfr;
 	struct mtp_event	event;
 	int ret = -EINVAL;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	int thread_supported = MTP_THREAD_SUPPORT;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 	switch (code) {
 	case MTP_SEND_FILE:
 	case MTP_RECEIVE_FILE:
 	case MTP_SEND_FILE_WITH_HEADER:
+
 		if (copy_from_user(&mfr, (void __user *)value, sizeof(mfr))) {
 			ret = -EFAULT;
 			goto fail;
@@ -1088,6 +1342,18 @@ static long mtp_ioctl(struct file *fp, unsigned code, unsigned long value)
 			ret = mtp_send_event(dev, &event);
 		mtp_unlock(&dev->ioctl_excl);
 	break;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	case MTP_THREAD_SUPPORTED:
+	{
+		printk("[USB][MTP] %s: ioctl MTP_THREAD_SUPPORTED, val %d\n", __func__, (int)thread_supported);
+		if (copy_to_user((void __user *)value, &thread_supported, sizeof(int))) {
+			ret = -EFAULT;
+			goto fail;
+		} else
+			ret = 0;
+		break;
+	}
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	default:
 		DBG(dev->cdev, "unknown ioctl code: %d\n", code);
 	}
@@ -1111,23 +1377,65 @@ static long compat_mtp_ioctl(struct file *fp, unsigned code,
 	unsigned cmd;
 	bool send_file = false;
 	int ret = -EINVAL;
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	int thread_supported = MTP_THREAD_SUPPORT;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 
 	switch (code) {
 	case COMPAT_MTP_SEND_FILE:
 		cmd = MTP_SEND_FILE;
 		send_file = true;
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+		mtp_setup_perflock(true);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 		break;
 	case COMPAT_MTP_RECEIVE_FILE:
 		cmd = MTP_RECEIVE_FILE;
 		send_file = true;
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+		mtp_setup_perflock(true);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 		break;
 	case COMPAT_MTP_SEND_FILE_WITH_HEADER:
 		cmd = MTP_SEND_FILE_WITH_HEADER;
 		send_file = true;
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+		mtp_setup_perflock(true);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 		break;
 	case COMPAT_MTP_SEND_EVENT:
 		cmd = MTP_SEND_EVENT;
 		break;
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+	case COMPAT_MTP_SET_CPU_PERF:
+	{
+		if (value > 0) {
+			printk(KERN_INFO "[USB][MTP] %s: ioctl MTP_SET_CPU_PERF, files = %d\n", __func__, (int)value);
+			mtp_qos_enable((int)value);
+		}
+		break;
+	}
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	case COMPAT_MTP_THREAD_SUPPORTED:
+	{
+		printk("[USB][MTP] %s: ioctl MTP_THREAD_SUPPORTED, val %d\n", __func__, (int)thread_supported);
+		if (copy_to_user((void __user *)value, &thread_supported, sizeof(int))) {
+			ret = -EFAULT;
+			goto fail;
+		} else
+			ret = 0;
+		break;
+	}
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	default:
 		DBG(dev->cdev, "unknown compat_ioctl code: %d\n", code);
 		goto fail;
@@ -1168,6 +1476,9 @@ fail:
 static int mtp_open(struct inode *ip, struct file *fp)
 {
 	printk(KERN_INFO "mtp_open\n");
+/*++ 2014/10/21, USB Team, PCN00019 ++*/
+	htc_mtp_open_state = 1;
+/*-- 2014/10/21, USB Team, PCN00019 --*/
 	if (mtp_lock(&_mtp_dev->open_excl))
 		return -EBUSY;
 
@@ -1181,9 +1492,39 @@ static int mtp_open(struct inode *ip, struct file *fp)
 
 static int mtp_release(struct inode *ip, struct file *fp)
 {
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	struct usb_request *req = NULL;
+	struct mtp_dev *dev = _mtp_dev;
+	struct usb_composite_dev *cdev = dev->cdev;
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	printk(KERN_INFO "mtp_release\n");
-
+/*++ 2014/10/21, USB Team, PCN00019 ++*/
+	htc_mtp_open_state = 0;
+/*-- 2014/10/21, USB Team, PCN00019 --*/
 	mtp_unlock(&_mtp_dev->open_excl);
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+	mtp_setup_perflock(false);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	if (mtp_lock(&dev->read_excl)) {
+		DBG(cdev, "%s: set state as STATE_CANCELED to flush read job\n", __func__);
+		dev->state = STATE_CANCELED;
+		return 0;
+	}
+
+	/* Ask all request on rx_done back to rx_idle */
+	if (dev->state != STATE_OFFLINE) {
+		while ((req = mtp_req_get(dev, &dev->rx_done))) {
+			DBG(dev->cdev, "%s send %p from done to idle\n", __func__, req);
+			mtp_req_put(dev, &dev->rx_idle, req);
+		}
+	}
+
+	dev->read_count = 0;
+	mtp_unlock(&dev->read_excl);
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	return 0;
 }
 
@@ -1215,6 +1556,9 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 	u16	w_value = le16_to_cpu(ctrl->wValue);
 	u16	w_length = le16_to_cpu(ctrl->wLength);
 	unsigned long	flags;
+/*++ 2015/01/15, USB Team, PCN00068 ++*/
+	int	id;
+/*-- 2015/01/15, USB Team, PCN00068 --*/
 
 	VDBG(cdev, "mtp_ctrlrequest "
 			"%02x.%02x v%04x i%04x l%u\n",
@@ -1246,8 +1590,12 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 		DBG(cdev, "class request: %d index: %d value: %d length: %d\n",
 			ctrl->bRequest, w_index, w_value, w_length);
 
-		if (ctrl->bRequest == MTP_REQ_CANCEL && w_index == 0
+/*++ 2015/01/15, USB Team, PCN00068 ++*/
+		id = mtp_interface_desc.bInterfaceNumber;
+		if (ctrl->bRequest == MTP_REQ_CANCEL
+				&& (w_index == 0 || w_index == id)
 				&& w_value == 0) {
+/*-- 2015/01/15, USB Team, PCN00068 --*/
 			DBG(cdev, "MTP_REQ_CANCEL\n");
 
 			spin_lock_irqsave(&dev->lock, flags);
@@ -1347,12 +1695,23 @@ mtp_function_unbind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct mtp_dev	*dev = func_to_mtp(f);
 	struct usb_request *req;
-	int i;
 
 	while ((req = mtp_req_get(dev, &dev->tx_idle)))
 		mtp_request_free(req, dev->ep_in);
-	for (i = 0; i < RX_REQ_MAX; i++)
-		mtp_request_free(dev->rx_req[i], dev->ep_out);
+
+/*++ 2014/12/29, USB Team, PCN00062 ++*/
+	/* Dequeue all request pending on ep_out */
+	usb_ep_nuke(dev->ep_out);
+/*-- 2014/12/29, USB Team, PCN00062 --*/
+
+	while ((req = mtp_req_get(dev, &dev->rx_idle))) {
+		DBG(dev->cdev, "%s: rx_idle release (%p)\n", __func__, req);
+		mtp_request_free(req, dev->ep_out);
+	}
+	while ((req = mtp_req_get(dev, &dev->rx_done))) {
+		DBG(dev->cdev, "%s: rx_done release (%p)\n", __func__, req);
+		mtp_request_free(req, dev->ep_out);
+	}
 	while ((req = mtp_req_get(dev, &dev->intr_idle)))
 		mtp_request_free(req, dev->ep_intr);
 	dev->state = STATE_OFFLINE;
@@ -1441,22 +1800,22 @@ static int mtp_bind_config(struct usb_configuration *c, bool ptp_config)
 			return ret;
 		mtp_string_defs[INTERFACE_STRING_INDEX].id = ret;
 		mtp_interface_desc.iInterface = ret;
+/*++ 2014/12/12, USB Team, PCN00056 ++*/
+		ptp_interface_desc.iInterface = ret;
+/*-- 2014/12/12, USB Team, PCN00056 --*/
 	}
 
 	dev->cdev = c->cdev;
 	dev->function.name = "mtp";
 	dev->function.strings = mtp_strings;
-	if (ptp_config) {
-		dev->function.fs_descriptors = fs_ptp_descs;
-		dev->function.hs_descriptors = hs_ptp_descs;
-		if (gadget_is_superspeed(c->cdev->gadget))
-			dev->function.ss_descriptors = ss_ptp_descs;
-	} else {
-		dev->function.fs_descriptors = fs_mtp_descs;
-		dev->function.hs_descriptors = hs_mtp_descs;
-		if (gadget_is_superspeed(c->cdev->gadget))
-			dev->function.ss_descriptors = ss_mtp_descs;
-	}
+
+/*++ 2015/10/12 USB Team, PCN00086 ++*/
+	dev->function.fs_descriptors = fs_ptp_descs;
+	dev->function.hs_descriptors = hs_ptp_descs;
+	if (gadget_is_superspeed(c->cdev->gadget))
+		dev->function.ss_descriptors = ss_ptp_descs;
+/*-- 2015/10/12 USB Team, PCN00086 --*/
+
 	dev->function.bind = mtp_function_bind;
 	dev->function.unbind = mtp_function_unbind;
 	dev->function.set_alt = mtp_function_set_alt;
@@ -1480,6 +1839,10 @@ static int mtp_setup(void)
 	init_waitqueue_head(&dev->intr_wq);
 	atomic_set(&dev->open_excl, 0);
 	atomic_set(&dev->ioctl_excl, 0);
+/*++ 2014/11/20, USB Team, PCN00042 ++*/
+	INIT_LIST_HEAD(&dev->rx_idle);
+	INIT_LIST_HEAD(&dev->rx_done);
+/*-- 2014/11/20, USB Team, PCN00042 --*/
 	INIT_LIST_HEAD(&dev->tx_idle);
 	INIT_LIST_HEAD(&dev->intr_idle);
 
@@ -1492,6 +1855,17 @@ static int mtp_setup(void)
 	INIT_WORK(&dev->receive_file_work, receive_file_work);
 
 	_mtp_dev = dev;
+/*++ 2014/10/21, USB Team, PCN00019 ++*/
+	htc_mtp_open_state = 0;
+/*-- 2014/10/21, USB Team, PCN00019 --*/
+
+/*++ 2014/10/29, USB Team, PCN00031 ++*/
+#ifdef CONFIG_PERFLOCK
+	INIT_WORK(&dev->release_perflock_work, release_perflock_work_func);
+	perf_lock_init(&dev->perf_lock, TYPE_PERF_LOCK, PERF_LOCK_HIGHEST, "htc_mtp");
+	setup_timer(&dev->perf_timer, mtp_perf_lock_disable, (unsigned long)dev);
+#endif
+/*-- 2014/10/29, USB Team, PCN00031 --*/
 
 	ret = misc_register(&mtp_device);
 	if (ret)

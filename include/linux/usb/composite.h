@@ -40,6 +40,9 @@
 #include <linux/usb/gadget.h>
 #include <linux/log2.h>
 #include <linux/configfs.h>
+/*++ 2014/10/29 USB Team, PCN00025 ++*/
+#include <linux/switch.h>
+/*-- 2014/10/29 USB Team, PCN00025 --*/
 
 /*
  * USB function drivers should return USB_GADGET_DELAYED_STATUS if they
@@ -397,6 +400,10 @@ struct usb_composite_dev {
 	struct list_head		configs;
 	struct list_head		gstrings;
 	struct usb_composite_driver	*driver;
+/*++ 2014/10/31, USB Team, PCN00035 ++*/
+	struct switch_dev		sw_function_switch_on;
+	struct switch_dev		sw_function_switch_off;
+/*-- 2014/10/31, USB Team, PCN00035 --*/
 	u8				next_string_id;
 	char				*def_manufacturer;
 
@@ -412,6 +419,18 @@ struct usb_composite_dev {
 
 	/* protects deactivations and delayed_status counts*/
 	spinlock_t			lock;
+/*++ 2014/10/29 USB Team, PCN00025 ++*/
+	struct switch_dev		sw_connect2pc;
+/*-- 2014/10/29 USB Team, PCN00025 --*/
+/*++ 2014/10/29, USB Team, PCN00030 ++*/
+	struct work_struct cdusbcmdwork;
+/*-- 2014/10/29, USB Team, PCN00030 ++*/
+	struct delayed_work request_reset;
+/*++ 2015/01/05 USB Team, PCN00063 ++*/
+	struct delayed_work cdusbcmd_vzw_unmount_work;
+	struct switch_dev compositesdev;
+	int unmount_cdrom_mask;
+/*-- 2015/01/05 USB Team, PCN00063 --*/
 };
 
 extern int usb_string_id(struct usb_composite_dev *c);

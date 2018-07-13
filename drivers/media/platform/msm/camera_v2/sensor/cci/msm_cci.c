@@ -136,6 +136,13 @@ static int32_t msm_cci_validate_queue(struct cci_device *cci_dev,
 	int32_t rc = 0;
 	uint32_t read_val = 0;
 	uint32_t reg_offset = master * 0x200 + queue * 0x100;
+	// HTC_START, for debug
+	if(cci_dev->ref_count == 0 || cci_dev->cci_state == CCI_STATE_DISABLED)
+	{
+		pr_err("[CAM]%s error, ref_count = %d, cci_state = %d\n", __func__, cci_dev->ref_count, cci_dev->cci_state);
+		return -EINVAL;
+	}
+	// HTC_END
 	read_val = msm_camera_io_r_mb(cci_dev->base +
 		CCI_I2C_M0_Q0_CUR_WORD_CNT_ADDR + reg_offset);
 	CDBG("%s line %d CCI_I2C_M0_Q0_CUR_WORD_CNT_ADDR %d len %d max %d\n",

@@ -184,6 +184,73 @@ config OV7695
 		VGA. It does not support auto focus. It supports
 		few special effects like saturation.
 
+config T4KA7
+       bool "Sensor T4KA7 (YUV 20MP)"
+       depends on MSMB_CAMERA
+       ---help---
+               T4KA7 is Toshiba YUV sensor. It supports 20 MP preview
+               and snapshot. The preview and snapshot resolution shall be
+               1280 * 270. It does not support auto focus. It supports
+               few special effects like saturation.
+
+config OV16880
+       bool "Sensor OV16880 (YUV 16MP)"
+       depends on MSMB_CAMERA
+       ---help---
+               OV16880 is OV YUV sensor. It supports 16 MP preview
+               and snapshot. The preview and snapshot resolution shall be
+               1280 * 270. It does not support auto focus. It supports
+               few special effects like saturation.
+
+config IMX220
+       bool "Sensor IMX220 (YUV 20MP)"
+       depends on MSMB_CAMERA
+       ---help---
+               IMX220 is Sony YUV sensor. It supports 20 MP preview
+               and snapshot. The preview and snapshot resolution shall be
+               1280 * 270. It does not support auto focus. It supports
+               few special effects like saturation.
+
+config VD6869
+       bool "ST VD6869 (YUV 4MP)"
+       depends on MSMB_CAMERA
+       ---help---
+               VD6869 is ST YUV sensor. It supports 4 MP preview
+               and snapshot. The preview and snapshot resolution shall be
+               1280 * 270. It does not support auto focus. It supports
+               few special effects like saturation.
+
+config OV2722
+	bool "Sensor ov2722"
+	depends on MSMB_CAMERA
+	default n
+	---help---
+	  Support for OV2722 sensor driver.
+
+config OV13850_FRONT
+       bool "Sensor OV13850_FRONT (YUV 13MP)"
+       depends on MSMB_CAMERA
+       ---help---
+               OV13850_FRONT is OV YUV sensor. It supports 13 MP preview
+               and snapshot. The preview and snapshot resolution shall be
+               1280 * 270. It does not support auto focus. It supports
+               few special effects like saturation.
+
+config OV4688_FRONT
+       bool "Sensor OV4688_FRONT (BAYER 4MP)"
+       depends on MSMB_CAMERA
+       ---help---
+               OV13850_FRONT is OV BAYER sensor. It supports 4 MP preview
+               and snapshot. The preview and snapshot resolution shall be
+               1280 * 270. It does not support auto focus. It supports
+               few special effects like saturation.
+
+config OIS_CALIBRATION
+	    bool "OIS GYRO offset calibration"
+	    depends on MSMB_CAMERA
+        ---help---
+		OIS GYRO offset calibration
+
 config SP1628
 	bool "Sensor SP1628 (YUV 720P)"
 	depends on MSMB_CAMERA
@@ -246,6 +313,15 @@ config OV12830
 		4 mipi lanes, preview config = 2112 * 1500 at 30 fps,
 		snapshot config = 4224 * 3000 at 15 fps.
 		2 lanes max fps is 18, 4 lanes max fps is 24.
+
+config OV8858_FRONT
+	bool "Sensor OV8858 (BAYER 8M)"
+	depends on MSMB_CAMERA
+	---help---
+		OV8858_FRONT is OV Bayer sensor. It supports 8 MP preview
+		and snapshot. The preview and snapshot resolution shall be
+		1280 * 270. It does not support auto focus. It supports
+		few special effects like saturation.
 
 config MSM_V4L2_VIDEO_OVERLAY_DEVICE
 	tristate "Qualcomm MSM V4l2 video overlay device"

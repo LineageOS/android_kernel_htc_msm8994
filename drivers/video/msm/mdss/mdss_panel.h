@@ -412,6 +412,43 @@ struct mdss_mdp_pp_tear_check {
 	u32 refx100;
 };
 
+/**
+ *  HTC: A Struct for Backlgith 1.0.
+ *  Apply on htc_backlight_transfer_bl_brightness function.
+ *  The function will base on brt_data and bl_data to transfer brt and bl value.
+ *  The brt and bl was direct map. For internal value, we will use interpolation method to get transfer value.
+ *
+ *  size: A value to save brt and bl table size.
+ *  brt_data: A point referring to brightness table related data.
+ *  bl_data: A point referring to backlight table related data
+ */
+struct htc_backlight1_table {
+	int size;
+	u16 *brt_data;
+	u16 *bl_data;
+};
+
+/**
+ *  HTC: A Struct for Backlgith 2.0.
+ *  Apply on htc_backlight_bl_to_nits and htc_backlight_nits_to_bl function.
+ *  The function will base on table value to transfer nits and bl.
+ *  The table value was bl level. We can base on scale and size to map the bl level.
+ *  For nits transfer, We can base on scale to know what index on bl table we should to map.
+ *  For bl transfer, We can search the bl value on table and get correct index.
+ *  And base on the index and scalue to map the nits value.
+ *
+ *  size: A value to save nits_bl table size.
+ *  scale: A value to define the relation between table data and nits value.
+ *  max_nits: A value to save max brightness for Backlight 2.0. It should be size * scale.
+ *  data: A point referring to nits_bl table related data. It was save the bl level.
+ */
+struct htc_backlight2_table {
+	int size;
+	int scale;
+	int max_nits;
+	u16 *data;
+};
+
 struct mdss_panel_info {
 	u32 xres;
 	u32 yres;
@@ -488,6 +525,24 @@ struct mdss_panel_info {
 	struct mipi_panel_info mipi;
 	struct lvds_panel_info lvds;
 	struct edp_panel_info edp;
+
+	/*HTC add as below*/
+	uint8_t htc_panel_id;
+	int camera_blk;
+	int camera_dua_blk;
+	int first_power_on;
+	u32 mdss_pp_hue;
+	u32 skip_frame;
+
+	uint32_t pcc_r;
+	uint32_t pcc_g;
+	uint32_t pcc_b;
+
+	struct htc_backlight1_table brt_bl_table;
+	struct htc_backlight2_table nits_bl_table;
+
+	bool even_roi;
+	bool skip_first_pinctl;
 
 	/* debugfs structure for the panel */
 	struct mdss_panel_debugfs_info *debugfs_info;

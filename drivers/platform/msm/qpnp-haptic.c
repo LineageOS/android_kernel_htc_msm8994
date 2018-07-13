@@ -24,6 +24,15 @@
 #include <linux/delay.h>
 #include <linux/qpnp/qpnp-haptic.h>
 #include "../../staging/android/timed_output.h"
+#include <linux/vibtrig.h>
+#include <linux/spinlock.h>
+
+#define VIB_DBG_LOG(fmt, ...) \
+		printk(KERN_DEBUG "[VIB][DBG] " fmt, ##__VA_ARGS__)
+#define VIB_INFO_LOG(fmt, ...) \
+		printk(KERN_INFO "[VIB] " fmt, ##__VA_ARGS__)
+#define VIB_ERR_LOG(fmt, ...) \
+		printk(KERN_ERR "[VIB][ERR] " fmt, ##__VA_ARGS__)
 
 #define QPNP_IRQ_FLAGS	(IRQF_TRIGGER_RISING | \
 			IRQF_TRIGGER_FALLING | \
@@ -70,7 +79,7 @@
 #define QPNP_HAP_VMAX_MASK		0xC1
 #define QPNP_HAP_VMAX_SHIFT		1
 #define QPNP_HAP_VMAX_MIN_MV		116
-#define QPNP_HAP_VMAX_MAX_MV		3596
+#define QPNP_HAP_VMAX_MAX_MV		7308
 #define QPNP_HAP_ILIM_MASK		0xFE
 #define QPNP_HAP_ILIM_MIN_MV		400
 #define QPNP_HAP_ILIM_MAX_MV		800
@@ -237,7 +246,7 @@ struct qpnp_pwm_info {
  *  @ work - worker
  *  @ auto_res_err_work - correct auto resonance error
  *  @ pwm_info - pwm info
- *  @ lock - mutex lock
+ *  @ lock - spin lock
  *  @ wf_lock - mutex lock for waveform
  *  @ play_mode - play mode
  *  @ auto_res_mode - auto resonace mode
@@ -283,12 +292,15 @@ struct qpnp_hap {
 	struct hrtimer hap_test_timer;
 	struct work_struct test_work;
 	struct qpnp_pwm_info pwm_info;
-	struct mutex lock;
+	spinlock_t lock;
 	struct mutex wf_lock;
 	struct completion completion;
 	enum qpnp_hap_mode play_mode;
 	enum qpnp_hap_auto_res_mode auto_res_mode;
 	enum qpnp_hap_high_z lra_high_z;
+	#ifdef CONFIG_VIB_TRIGGERS
+        struct vib_trigger_enabler enabler;
+	#endif
 	u32 timeout_ms;
 	u32 vmax_mv;
 	u32 ilim_ma;
@@ -322,6 +334,7 @@ struct qpnp_hap {
 	bool misc_trim_error_rc19p2_clk_reg_present;
 };
 
+static uint32_t sc_irq_count = 0;
 static struct qpnp_hap *ghap;
 
 /* helper to read a pmic register */
@@ -405,8 +418,14 @@ static int qpnp_hap_mod_enable(struct qpnp_hap *hap, int on)
 
 	rc = qpnp_hap_write_reg(hap, &val,
 			QPNP_HAP_EN_CTL_REG(hap->base));
+	if (!on && val)
+		VIB_INFO_LOG("reg=0x%x, rc=%d.\n", val, rc);
 	if (rc < 0)
+	{
+		if (on)
+			VIB_INFO_LOG("reg=0x%x, err=%d.\n", val, rc);
 		return rc;
+	}
 
 	hap->reg_en_ctl = val;
 
@@ -426,6 +445,10 @@ static int qpnp_hap_play(struct qpnp_hap *hap, int on)
 
 	rc = qpnp_hap_write_reg(hap, &val,
 			QPNP_HAP_PLAY_REG(hap->base));
+	if (on)
+		VIB_INFO_LOG("on, reg=0x%x, rc=%d.\n", hap->reg_en_ctl, rc);
+	else if (hap->reg_play & QPNP_HAP_PLAY_EN)
+		VIB_INFO_LOG("off, rc=%d.\n", rc);
 	if (rc < 0)
 		return rc;
 
@@ -490,6 +513,7 @@ static irqreturn_t qpnp_hap_sc_irq(int irq, void *_hap)
 	u8 reg;
 
 	/* clear short circuit register */
+	sc_irq_count++;
 	dev_dbg(&hap->spmi->dev, "Short circuit detected\n");
 	reg = QPNP_HAP_SC_CLR;
 	qpnp_hap_write_reg(hap, &reg, QPNP_HAP_SC_CLR_REG(hap->base));
@@ -667,6 +691,7 @@ static int qpnp_hap_vmax_config(struct qpnp_hap *hap)
 	rc = qpnp_hap_write_reg(hap, &reg, QPNP_HAP_VMAX_REG(hap->base));
 	if (rc)
 		return rc;
+	VIB_INFO_LOG("Set voltage = %d, reg = 0x%x", hap->vmax_mv, reg);
 
 	return 0;
 }
@@ -1062,6 +1087,36 @@ static ssize_t qpnp_hap_wf_s_rep_store(struct device *dev,
 	return count;
 }
 
+/* sysfs show for voltage_level */
+static ssize_t qpnp_hap_voltage_level_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+					 timed_dev);
+
+	return snprintf(buf, PAGE_SIZE, "[VIB] voltage input:%dmV\n", hap->vmax_mv);
+}
+
+/* sysfs store for voltage_level */
+static ssize_t qpnp_hap_voltage_level_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+					 timed_dev);
+	int input, rc = 0;
+
+	input = simple_strtoul(buf, NULL, 10);
+	hap->vmax_mv = input;
+
+	rc = qpnp_hap_vmax_config(hap);
+	if(rc<0)
+		VIB_INFO_LOG("qpnp_hap_vmax_config set failed(%d)", rc);
+
+	return count;
+}
+
 /* sysfs store function for play mode*/
 static ssize_t qpnp_hap_play_mode_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
@@ -1165,7 +1220,7 @@ static ssize_t qpnp_hap_min_max_test_data_store(struct device *dev,
 
 	int value = QPNP_TEST_TIMER_MS, i;
 
-	mutex_lock(&hap->lock);
+	spin_lock(&hap->lock);
 	qpnp_hap_mod_enable(hap, true);
 	for (i = 0; i < ARRAY_SIZE(qpnp_hap_min_max_test_data); i++) {
 		hrtimer_start(&hap->hap_test_timer,
@@ -1177,7 +1232,7 @@ static ssize_t qpnp_hap_min_max_test_data_store(struct device *dev,
 
 	qpnp_hap_play_byte(0, false);
 	qpnp_hap_mod_enable(hap, false);
-	mutex_unlock(&hap->lock);
+	spin_unlock(&hap->lock);
 
 	return count;
 }
@@ -1211,7 +1266,7 @@ static ssize_t qpnp_hap_ramp_test_data_store(struct device *dev,
 
 	int value = QPNP_TEST_TIMER_MS, i;
 
-	mutex_lock(&hap->lock);
+	spin_lock(&hap->lock);
 	qpnp_hap_mod_enable(hap, true);
 	for (i = 0; i < ARRAY_SIZE(qpnp_hap_ramp_test_data); i++) {
 		hrtimer_start(&hap->hap_test_timer,
@@ -1223,7 +1278,7 @@ static ssize_t qpnp_hap_ramp_test_data_store(struct device *dev,
 
 	qpnp_hap_play_byte(0, false);
 	qpnp_hap_mod_enable(hap, false);
-	mutex_unlock(&hap->lock);
+	spin_unlock(&hap->lock);
 
 	return count;
 }
@@ -1282,6 +1337,9 @@ static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(wf_s_rep, (S_IRUGO | S_IWUSR | S_IWGRP),
 			qpnp_hap_wf_s_rep_show,
 			qpnp_hap_wf_s_rep_store),
+	__ATTR(voltage_level, (S_IRUGO | S_IWUSR | S_IWGRP),
+			qpnp_hap_voltage_level_show,
+			qpnp_hap_voltage_level_store),
 	__ATTR(play_mode, (S_IRUGO | S_IWUSR | S_IWGRP),
 			qpnp_hap_play_mode_show,
 			qpnp_hap_play_mode_store),
@@ -1468,11 +1526,11 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 				/*
 				 * Start timer to poll Auto Resonance error bit
 				 */
-				mutex_lock(&hap->lock);
+				spin_lock(&hap->lock);
 				hrtimer_start(&hap->auto_res_err_poll_timer,
 						ktime_set(0, timeout_ns),
 						 HRTIMER_MODE_REL);
-				mutex_unlock(&hap->lock);
+				spin_unlock(&hap->lock);
 			}
 		} else {
 			rc = qpnp_hap_play(hap, on);
@@ -1503,16 +1561,17 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int value)
 	struct qpnp_hap *hap = container_of(dev, struct qpnp_hap,
 					 timed_dev);
 
-	mutex_lock(&hap->lock);
+	spin_lock(&hap->lock);
 	hrtimer_cancel(&hap->hap_timer);
 
 	if (value == 0) {
 		if (hap->state == 0) {
-			mutex_unlock(&hap->lock);
+			spin_unlock(&hap->lock);
 			return;
 		}
 		hap->state = 0;
 	} else {
+		VIB_INFO_LOG("enable=%d.\n", value);
 		value = (value > hap->timeout_ms ?
 				 hap->timeout_ms : value);
 		hap->state = 1;
@@ -1520,7 +1579,7 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int value)
 			      ktime_set(value / 1000, (value % 1000) * 1000000),
 			      HRTIMER_MODE_REL);
 	}
-	mutex_unlock(&hap->lock);
+	spin_unlock(&hap->lock);
 	schedule_work(&hap->work);
 }
 
@@ -1635,6 +1694,12 @@ static int qpnp_haptic_suspend(struct device *dev)
 {
 	struct qpnp_hap *hap = dev_get_drvdata(dev);
 
+	if (hap->use_sc_irq && (hap->sc_irq > 0)) {
+		disable_irq(hap->sc_irq);
+		if (sc_irq_count > 0)
+			VIB_ERR_LOG("%s: sc_irq = %d\n", __func__, sc_irq_count);
+	}
+
 	hrtimer_cancel(&hap->hap_timer);
 	cancel_work_sync(&hap->work);
 	/* turn-off haptic */
@@ -1642,9 +1707,22 @@ static int qpnp_haptic_suspend(struct device *dev)
 
 	return 0;
 }
+
+static int qpnp_haptic_resume(struct device *dev)
+{
+	struct qpnp_hap *hap = dev_get_drvdata(dev);
+
+	if (hap->use_sc_irq && (hap->sc_irq > 0)) {
+		if (sc_irq_count > 0)
+			VIB_ERR_LOG("%s: sc_irq = %d\n", __func__, sc_irq_count);
+		enable_irq(hap->sc_irq);
+	}
+
+	return 0;
+}
 #endif
 
-static SIMPLE_DEV_PM_OPS(qpnp_haptic_pm_ops, qpnp_haptic_suspend, NULL);
+static SIMPLE_DEV_PM_OPS(qpnp_haptic_pm_ops, qpnp_haptic_suspend, qpnp_haptic_resume);
 
 /* Configuration api for haptics registers */
 static int qpnp_hap_config(struct qpnp_hap *hap)
@@ -1887,6 +1965,19 @@ static int qpnp_hap_config(struct qpnp_hap *hap)
 
 	return rc;
 }
+#ifdef CONFIG_VIB_TRIGGERS
+static void qpnp_vib_trigger_enable(struct vib_trigger_enabler *enabler, int value)
+{
+        struct qpnp_hap *hap;
+        struct timed_output_dev *dev;
+        hap = enabler->trigger_data;
+        dev = &hap->timed_dev;
+
+        VIB_INFO_LOG("vib_trigger=%d.\r\n", value);
+
+        qpnp_hap_td_enable(dev, value);
+}
+#endif
 
 /* DT parsing for haptics parameters */
 static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
@@ -2112,6 +2203,7 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 	struct resource *hap_resource;
 	int rc, i;
 
+	VIB_INFO_LOG("%s: ++\n", __func__);
 	hap = devm_kzalloc(&spmi->dev, sizeof(*hap), GFP_KERNEL);
 	if (!hap)
 		return -ENOMEM;
@@ -2139,7 +2231,7 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 		return rc;
 	}
 
-	mutex_init(&hap->lock);
+	spin_lock_init(&hap->lock);
 	mutex_init(&hap->wf_lock);
 	INIT_WORK(&hap->work, qpnp_hap_worker);
 	init_completion(&hap->completion);
@@ -2178,6 +2270,16 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 
 	ghap = hap;
 
+#ifdef CONFIG_VIB_TRIGGERS
+        hap->enabler.name = "qpnp-haptic";
+        hap->enabler.default_trigger = "vibrator";
+        hap->enabler.enable = qpnp_vib_trigger_enable;
+        hap->enabler.trigger_data = hap;
+        vib_trigger_enabler_register(&hap->enabler);
+#endif
+
+	VIB_INFO_LOG("%s: --, play_mode=%d\n", __func__, hap->play_mode);
+
 	return 0;
 
 sysfs_fail:
@@ -2188,7 +2290,6 @@ sysfs_fail:
 timed_output_fail:
 	cancel_work_sync(&hap->work);
 	hrtimer_cancel(&hap->hap_timer);
-	mutex_destroy(&hap->lock);
 	mutex_destroy(&hap->wf_lock);
 
 	return rc;
@@ -2206,9 +2307,10 @@ static int qpnp_haptic_remove(struct spmi_device *spmi)
 	cancel_work_sync(&hap->work);
 	hrtimer_cancel(&hap->hap_timer);
 	timed_output_dev_unregister(&hap->timed_dev);
-	mutex_destroy(&hap->lock);
 	mutex_destroy(&hap->wf_lock);
-
+#ifdef CONFIG_VIB_TRIGGERS
+        vib_trigger_enabler_unregister(&hap->enabler);
+#endif
 	return 0;
 }
 

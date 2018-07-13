@@ -44,6 +44,7 @@
 #include <linux/oom.h>
 #include <linux/prefetch.h>
 #include <linux/debugfs.h>
+#include <linux/jiffies.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -1163,7 +1164,7 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 			TTU_UNMAP|TTU_IGNORE_ACCESS,
 			&dummy1, &dummy2, &dummy3, &dummy4, &dummy5, true);
 	list_splice(&clean_pages, page_list);
-	__mod_zone_page_state(zone, NR_ISOLATED_FILE, -ret);
+	mod_zone_page_state(zone, NR_ISOLATED_FILE, -ret);
 	return ret;
 }
 
@@ -2526,7 +2527,11 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	struct zone *zone;
 	unsigned long writeback_threshold;
 	bool aborted_reclaim;
+	unsigned long start_jiffies = jiffies;
+	unsigned int msecs_age;
 
+	if (reclaim_state)
+		reclaim_state->trigger_lmk = 0;
 	delayacct_freepages_start();
 
 	if (global_reclaim(sc))
@@ -2588,6 +2593,13 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 
 out:
 	delayacct_freepages_end();
+
+	msecs_age = jiffies_to_msecs(jiffies - start_jiffies);
+	if ((reclaim_state && reclaim_state->trigger_lmk && sc->order >= 2) || msecs_age / 1000 > 10) {
+		pr_warn("%s(%d:%d): (reclaim  %d.%03ds), trigger lmk %d times, order:%d, mode:0x%x\n",
+		        current->comm, current->pid, current->tgid, msecs_age / 1000, msecs_age % 1000, reclaim_state->trigger_lmk, sc->order, sc->gfp_mask);
+		dump_stack();
+	}
 
 	if (sc->nr_reclaimed)
 		return sc->nr_reclaimed;
@@ -2754,6 +2766,7 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	};
 	struct shrink_control shrink = {
 		.gfp_mask = sc.gfp_mask,
+		.order = order,
 	};
 
 	/*
@@ -2837,6 +2850,7 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 	};
 	struct shrink_control shrink = {
 		.gfp_mask = sc.gfp_mask,
+		.order = 0,
 	};
 
 	/*
@@ -3004,6 +3018,7 @@ static bool kswapd_shrink_zone(struct zone *zone,
 	struct reclaim_state *reclaim_state = current->reclaim_state;
 	struct shrink_control shrink = {
 		.gfp_mask = sc->gfp_mask,
+		.order = sc->order,
 	};
 	bool lowmem_pressure;
 
@@ -3493,6 +3508,7 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 	};
 	struct shrink_control shrink = {
 		.gfp_mask = sc.gfp_mask,
+		.order = 0,
 	};
 	struct zonelist *zonelist = node_zonelist(numa_node_id(), sc.gfp_mask);
 	struct task_struct *p = current;
@@ -3702,6 +3718,7 @@ static int __zone_reclaim(struct zone *zone, gfp_t gfp_mask, unsigned int order)
 	};
 	struct shrink_control shrink = {
 		.gfp_mask = sc.gfp_mask,
+		.order = order,
 	};
 	unsigned long nr_slab_pages0, nr_slab_pages1;
 

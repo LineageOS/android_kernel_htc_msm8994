@@ -5,7 +5,9 @@
 #include <sys/types.h>
 #endif
 
+#ifndef CONFIG_CAMERA_DRIVER_VER_M
 #include <linux/v4l2-mediabus.h>
+#endif
 #include <media/msm_camsensor_sdk.h>
 
 #include <linux/types.h>
@@ -38,6 +40,9 @@
 #define MAX_AF_ITERATIONS 3
 #define MAX_NUMBER_OF_STEPS 47
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+#define MAX_LED_TRIGGERS 3
+#else
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
 #define MSM_V4L2_PIX_FMT_SBGGR14 v4l2_fourcc('B', 'G', '1', '4')
 	/* 14  BGBG.. GRGR.. */
@@ -47,6 +52,14 @@
 	/* 14  GRGR.. BGBG.. */
 #define MSM_V4L2_PIX_FMT_SRGGB14 v4l2_fourcc('R', 'G', '1', '4')
 	/* 14  RGRG.. GBGB.. */
+#endif
+
+/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+#define MAX_ACT_NAME_SIZE 32
+#define LC898212_HEX_MAX 0x7FFF //0x6A00
+#define LC898212_HEX_MIN 0x8001 //0x9600
+#define LC898212_DEC_MAX 1023
+/*HTC_END, HTC_VCM*/
 
 enum flash_type {
 	LED_FLASH = 1,
@@ -159,6 +172,9 @@ enum csiphy_cfg_type_t {
 enum camera_vreg_type {
 	VREG_TYPE_DEFAULT,
 	VREG_TYPE_CUSTOM,
+	//HTC_CAM_START
+	VREG_TYPE_GPIO,
+	//HTC_CAM_END
 };
 
 enum sensor_af_t {
@@ -222,15 +238,75 @@ struct camera_vreg_t {
 	uint32_t delay;
 	const char *custom_vreg_name;
 	enum camera_vreg_type type;
+	//HTC_CAM_START
+	int32_t gpios_index;
+	//HTC_CAM_END
 };
+
+/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+struct fuse_id{
+	uint32_t fuse_id_word1;
+	uint32_t fuse_id_word2;
+	uint32_t fuse_id_word3;
+	uint32_t fuse_id_word4;
+};
+
+typedef struct{
+	char    ACT_NAME[MAX_ACT_NAME_SIZE]; /*HTC Harvey 20130701 - Set otp af value*/
+	uint8_t VCM_START_MSB;
+	uint8_t VCM_START_LSB;
+	uint8_t AF_INF_MSB;
+	uint8_t AF_INF_LSB;
+	uint8_t AF_MACRO_MSB;
+	uint8_t AF_MACRO_LSB;
+	uint8_t VCM_BIAS;
+	uint8_t VCM_OFFSET;
+	uint8_t VCM_BOTTOM_MECH_MSB;
+	uint8_t VCM_BOTTOM_MECH_LSB;
+	uint8_t VCM_TOP_MECH_MSB;
+	uint8_t VCM_TOP_MECH_LSB;
+	uint8_t VCM_VENDOR_ID_VERSION;
+	uint8_t VCM_VENDOR;
+	uint8_t ACT_ID;
+	uint32_t MODULE_ID_AB;
+}af_value_t;
+/*HTC_END, HTC_VCM*/
+
+/*HTC_START, read alpha setting*/
+struct alpha_value{
+	uint8_t Alpha_Gb;
+	uint8_t Alpha_B;
+	uint8_t Alpha_R;
+	uint8_t Alpha_Gr;
+};
+/*HTC_END*/
 
 struct sensorb_cfg_data {
 	int cfgtype;
+	/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+	int8_t sensor_ver;
+	int8_t lens_id;
+	af_value_t af_value;
+	/*HTC_END, HTC_VCM*/
 	union {
 		struct msm_sensor_info_t      sensor_info;
 		struct msm_sensor_init_params sensor_init_params;
 		void                         *setting;
+		/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+		struct fuse_id fuse;
+		/*HTC_END, HTC_VCM*/
 	} cfg;
+	/*HTC_START, check module type*/
+	int module_type;    //0x00: In House module;   0x01: Altek module
+	/*HTC_END*/
+	/*HTC_START, PDAF data ptr*/
+	uint8_t *pdaf_buffer;
+	uint32_t pdaf_size;
+	uint8_t is_pdaf_supported;
+	/*HTC_END*/
+	/*HTC_START, read alpha setting*/
+	struct alpha_value alpha;
+	/*HTC_END*/
 };
 
 struct csid_cfg_data {
@@ -409,9 +485,25 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
 	CFG_SET_STREAM_TYPE,
+/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+	CFG_I2C_IOCTL_R_OTP,
+/*HTC_END, HTC_VCM*/
+/*HTC_START, read camera emmc*/
+	CFG_I2C_IOCTL_R_EMMC,
+/*HTC_END*/
+/*HTC_START, GYRO Calibration*/
+	CFG_SET_GYRO_CALIBRATION,
+/*HTC_END*/
+/*HTC_START, PDAF data ptr*/
+	CFG_GET_PDAF_SIZE,
+	CFG_READ_PDAF_DATA,
+/*HTC_END*/
 };
 
 enum msm_actuator_cfg_type_t {
+/*HTC_START, HTC_VCM, Harvey 20130701 - Set otp af value*/
+	CFG_SET_ACTUATOR_AF_VALUE,
+/*HTC_END, HTC_VCM*/
 	CFG_GET_ACTUATOR_INFO,
 	CFG_SET_ACTUATOR_INFO,
 	CFG_SET_DEFAULT_FOCUS,
@@ -492,11 +584,27 @@ struct msm_actuator_params_t {
 	struct msm_actuator_reg_params_t *reg_tbl_params;
 	struct reg_settings_t *init_settings;
 	struct park_lens_data_t park_lens;
+	/*HTC_START, HTC_VCM*/
+	char ACT_NAME[MAX_ACT_NAME_SIZE];
+	/*HTC_END, HTC_VCM*/
 };
+
+/*HTC_START, HTC_VCM, support multiple I2C access type for actuator modulation*/
+enum actuator_I2C_func_select {
+	WRITE_SEQ_TABLE,
+	WRITE_TABLE_W_MICRODELAY,
+	WRITE_MULTI_TABLE
+};
+/*HTC_END, HTC_VCM*/
 
 struct msm_actuator_set_info_t {
 	struct msm_actuator_params_t actuator_params;
 	struct msm_actuator_tuning_params_t af_tuning_params;
+/*HTC_START, HTC_VCM, for actuator modulation*/
+	uint8_t enable_focus_step_log;
+	uint16_t *step_position_table;                //Move step position table to user space
+	enum actuator_I2C_func_select act_i2c_select; //support multiple I2C access type
+/*HTC_END, HTC_VCM*/
 };
 
 struct msm_actuator_get_info_t {
@@ -526,6 +634,25 @@ enum af_camera_name {
 	ACTUATOR_WEB_CAM_2,
 };
 
+/*HTC_START, HTC_VCM, Harvey 20130701 - Set otp af value*/
+struct msm_actuator_af_OTP_info_t {
+	uint8_t VCM_OTP_Read;
+	uint16_t VCM_Start;
+	uint16_t VCM_Infinity;
+	uint16_t VCM_Macro;
+	/* HTC_START pg 20130220 lc898212 act enable */
+	uint8_t VCM_Bias;
+	uint8_t VCM_Offset;
+	uint16_t VCM_Bottom_Mech;
+	uint16_t VCM_Top_Mech;
+	uint8_t VCM_Vendor_Id_Version;
+	/* HTC_END pg 20130220 lc898212 act enable */
+	uint8_t VCM_Vendor;
+	uint8_t act_id;
+	char act_name[MAX_SENSOR_NAME];
+};
+/*HTC_END, HTC_VCM*/
+
 struct msm_ois_cfg_data {
 	int cfgtype;
 	union {
@@ -549,6 +676,9 @@ struct msm_actuator_cfg_data {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+		/*HTC_START, HTC_VCM, Harvey 20130701 - Set otp af value*/
+		af_value_t af_value;
+		/*HTC_END, HTC_VCM*/
 	} cfg;
 };
 
@@ -567,12 +697,20 @@ struct msm_camera_led_cfg_t {
 	int32_t flash_duration[MAX_LED_TRIGGERS];
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_flash_init_info_t {
+	enum msm_flash_driver_type flash_driver_type;
+	struct msm_sensor_power_setting_array *power_setting_array;
+	struct msm_camera_i2c_reg_setting_array *settings;
+};
+#else
 struct msm_flash_init_info_t {
 	enum msm_flash_driver_type flash_driver_type;
 	uint32_t slave_addr;
 	struct msm_sensor_power_setting_array *power_setting_array;
 	struct msm_camera_i2c_reg_setting_array *settings;
 };
+#endif
 
 struct msm_flash_cfg_data_t {
 	enum msm_flash_cfg_type_t cfg_type;
@@ -664,11 +802,19 @@ struct msm_actuator_params_t32 {
 	compat_uptr_t reg_tbl_params;
 	compat_uptr_t init_settings;
 	struct park_lens_data_t park_lens;
+	/*HTC_START, HTC_VCM*/
+	char ACT_NAME[MAX_ACT_NAME_SIZE];
+	/*HTC_END, HTC_VCM*/
 };
 
 struct msm_actuator_set_info_t32 {
 	struct msm_actuator_params_t32 actuator_params;
 	struct msm_actuator_tuning_params_t32 af_tuning_params;
+/*HTC_START, HTC_VCM, for actuator modulation*/
+	uint8_t enable_focus_step_log;
+	uint16_t *step_position_table;                //Move step position table to user space
+	enum actuator_I2C_func_select act_i2c_select; //support multiple I2C access type
+/*HTC_END, HTC_VCM*/
 };
 
 struct sensor_init_cfg_data32 {
@@ -698,6 +844,9 @@ struct msm_actuator_cfg_data32 {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+		/*HTC_START, HTC_VCM, Harvey 20130701 - Set otp af value*/
+		af_value_t af_value;
+		/*HTC_END, HTC_VCM*/
 	} cfg;
 };
 
@@ -711,11 +860,30 @@ struct csiphy_cfg_data32 {
 
 struct sensorb_cfg_data32 {
 	int cfgtype;
+	/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+	int8_t sensor_ver;
+	int8_t lens_id;
+	af_value_t af_value;
+	/*HTC_END, HTC_VCM*/
 	union {
 		struct msm_sensor_info_t      sensor_info;
 		struct msm_sensor_init_params sensor_init_params;
 		compat_uptr_t                 setting;
+		/*HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+		struct fuse_id fuse;
+		/*HTC_END, HTC_VCM*/
 	} cfg;
+	/*HTC_START, check module type*/
+	int module_type;    //0x00: In House module;   0x01: Altek module
+	/*HTC_END*/
+	/*HTC_START, PDAF data ptr*/
+	compat_uptr_t pdaf_buffer;
+	uint32_t pdaf_size;
+	uint8_t is_pdaf_supported;
+	/*HTC_END*/
+	/*HTC_START, read alpha setting*/
+	struct alpha_value alpha;
+	/*HTC_END*/
 };
 
 struct msm_ois_params_t32 {
@@ -739,12 +907,20 @@ struct msm_ois_cfg_data32 {
 	} cfg;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_flash_init_info_t32 {
+	enum msm_flash_driver_type flash_driver_type;
+	compat_uptr_t power_setting_array;
+	compat_uptr_t settings;
+};
+#else
 struct msm_flash_init_info_t32 {
 	enum msm_flash_driver_type flash_driver_type;
 	uint32_t slave_addr;
 	compat_uptr_t power_setting_array;
 	compat_uptr_t settings;
 };
+#endif
 
 struct msm_flash_cfg_data_t32 {
 	enum msm_flash_cfg_type_t cfg_type;

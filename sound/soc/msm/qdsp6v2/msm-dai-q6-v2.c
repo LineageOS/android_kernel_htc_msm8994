@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,6 +27,13 @@
 #include <sound/q6afe-v2.h>
 #include <sound/msm-dai-q6-v2.h>
 #include <sound/pcm_params.h>
+
+//htc audio ++
+#undef pr_info
+#undef pr_err
+#define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
 
 #define MSM_DAI_PRI_AUXPCM_DT_DEV_ID 1
 #define MSM_DAI_SEC_AUXPCM_DT_DEV_ID 2
@@ -1649,7 +1656,7 @@ static int msm_auxpcm_dev_probe(struct platform_device *pdev)
 		goto fail_pdata_nomem;
 	}
 
-	dev_dbg(&pdev->dev, "%s: dev %p, dai_data %p, auxpcm_pdata %p\n",
+	dev_dbg(&pdev->dev, "%s: dev %pK, dai_data %pK, auxpcm_pdata %pK\n",
 		__func__, &pdev->dev, dai_data, auxpcm_pdata);
 
 	rc = of_property_read_u32_array(pdev->dev.of_node,
@@ -2410,6 +2417,17 @@ static int msm_dai_q6_mi2s_hw_params(struct snd_pcm_substream *substream,
 	struct msm_dai_q6_dai_data *dai_data = &mi2s_dai_config->mi2s_dai_data;
 	struct afe_param_id_i2s_cfg *i2s = &dai_data->port_config.i2s;
 
+//htc audio ++
+	u16 port_id = 0;
+
+	if (msm_mi2s_get_port_id(dai->id, substream->stream,
+				 &port_id) != 0) {
+		dev_err(dai->dev, "%s: Invalid Port ID 0x%x\n",
+				__func__, port_id);
+		return -EINVAL;
+	}
+//htc audio --
+
 	dai_data->channels = params_channels(params);
 	switch (dai_data->channels) {
 	case 8:
@@ -2487,7 +2505,7 @@ static int msm_dai_q6_mi2s_hw_params(struct snd_pcm_substream *substream,
 			__func__, params_format(params));
 		return -EINVAL;
 	}
-
+	pr_debug("%s: port 0x%x bit %d rate %d\n",__func__,port_id,dai_data->bitwidth,dai_data->rate); //HTC_AUDIO
 	dai_data->port_config.i2s.i2s_cfg_minor_version =
 			AFE_API_VERSION_I2S_CONFIG;
 	dai_data->port_config.i2s.sample_rate = dai_data->rate;

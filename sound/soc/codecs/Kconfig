@@ -559,3 +559,8 @@ config SND_SOC_MSM_HDMI_CODEC_RX
 	help
 	HDMI audio drivers should be built only if the platform
         supports hdmi panel.
+#HTC_AUD_START
+config SND_SOC_TFA98XX
+	tristate
+	default y
+#HTC_AUD_END

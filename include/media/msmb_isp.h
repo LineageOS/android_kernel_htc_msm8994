@@ -72,6 +72,40 @@ enum msm_vfe_axi_stream_src {
 	VFE_AXI_SRC_MAX
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum msm_vfe_frame_skip_pattern {
+	NO_SKIP,
+	EVERY_2FRAME,
+	EVERY_3FRAME,
+	EVERY_4FRAME,
+	EVERY_5FRAME,
+	EVERY_6FRAME,
+	EVERY_7FRAME,
+	EVERY_8FRAME,
+	EVERY_16FRAME,
+	EVERY_32FRAME,
+	SKIP_ALL,
+	MAX_SKIP,
+};
+
+enum msm_isp_stats_type {
+	MSM_ISP_STATS_AEC,   /* legacy based AEC */
+	MSM_ISP_STATS_AF,    /* legacy based AF */
+	MSM_ISP_STATS_AWB,   /* legacy based AWB */
+	MSM_ISP_STATS_RS,    /* legacy based RS */
+	MSM_ISP_STATS_CS,    /* legacy based CS */
+	MSM_ISP_STATS_IHIST, /* legacy based HIST */
+	MSM_ISP_STATS_SKIN,  /* legacy based SKIN */
+	MSM_ISP_STATS_BG,    /* Bayer Grids */
+	MSM_ISP_STATS_BF,    /* Bayer Focus */
+	MSM_ISP_STATS_BE,    /* Bayer Exposure*/
+	MSM_ISP_STATS_BHIST, /* Bayer Hist */
+	MSM_ISP_STATS_BF_SCALE, /* Bayer Focus scale */
+	MSM_ISP_STATS_HDR_BE, /* HDR Bayer Exposure */
+	MSM_ISP_STATS_HDR_BHIST, /* HDR Bayer Hist */
+	MSM_ISP_STATS_MAX    /* MAX */
+};
+#else
 enum msm_vfe_frame_skip_pattern {
 	NO_SKIP,
 	EVERY_2FRAME,
@@ -106,6 +140,7 @@ enum msm_isp_stats_type {
 	MSM_ISP_STATS_AEC_BG,   /* AEC BG */
 	MSM_ISP_STATS_MAX    /* MAX */
 };
+#endif
 
 /*
  * @stats_type_mask: Stats type mask (enum msm_isp_stats_type).
@@ -153,6 +188,19 @@ struct msm_vfe_fetch_engine_cfg {
 	uint32_t buf_stride;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_vfe_camif_cfg {
+	uint32_t lines_per_frame;
+	uint32_t pixels_per_line;
+	uint32_t first_pixel;
+	uint32_t last_pixel;
+	uint32_t first_line;
+	uint32_t last_line;
+	uint32_t epoch_line0;
+	uint32_t epoch_line1;
+	enum msm_vfe_camif_input camif_input;
+};
+#else
 /*
  * Camif output general configuration
  */
@@ -190,6 +238,7 @@ struct msm_vfe_testgen_cfg {
 	enum msm_vfe_testgen_color_pattern color_bar_pattern;
 	uint32_t burst_num_frame;
 };
+#endif
 
 enum msm_vfe_inputmux {
 	CAMIF,
@@ -204,6 +253,15 @@ enum msm_vfe_stats_composite_group {
 	STATS_COMPOSITE_GRP_MAX,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_vfe_pix_cfg {
+	struct msm_vfe_camif_cfg camif_cfg;
+	struct msm_vfe_fetch_engine_cfg fetch_engine_cfg;
+	enum msm_vfe_inputmux input_mux;
+	enum ISP_START_PIXEL_PATTERN pixel_pattern;
+	uint32_t input_format;
+};
+#else
 struct msm_vfe_pix_cfg {
 	struct msm_vfe_camif_cfg camif_cfg;
 	struct msm_vfe_testgen_cfg testgen_cfg;
@@ -213,6 +271,7 @@ struct msm_vfe_pix_cfg {
 	uint32_t input_format;
 	uint32_t is_split;
 };
+#endif
 
 struct msm_vfe_rdi_cfg {
 	uint8_t cid;
@@ -284,6 +343,24 @@ enum msm_vfe_axi_stream_cmd {
 	STOP_IMMEDIATELY,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_vfe_axi_stream_cfg_cmd {
+	uint8_t num_streams;
+	uint32_t stream_handle[MAX_NUM_STREAM];
+	enum msm_vfe_axi_stream_cmd cmd;
+};
+
+enum msm_vfe_axi_stream_update_type {
+	ENABLE_STREAM_BUF_DIVERT,
+	DISABLE_STREAM_BUF_DIVERT,
+	UPDATE_STREAM_FRAMEDROP_PATTERN,
+	UPDATE_STREAM_STATS_FRAMEDROP_PATTERN,
+	UPDATE_STREAM_AXI_CONFIG,
+	UPDATE_STREAM_REQUEST_FRAMES,
+	UPDATE_STREAM_ADD_BUFQ,
+	UPDATE_STREAM_REMOVE_BUFQ,
+};
+#else
 struct msm_vfe_axi_stream_cfg_cmd {
 	uint8_t num_streams;
 	uint32_t stream_handle[VFE_AXI_SRC_MAX];
@@ -301,6 +378,7 @@ enum msm_vfe_axi_stream_update_type {
 	UPDATE_STREAM_REMOVE_BUFQ,
 	UPDATE_STREAM_SW_FRAME_DROP,
 };
+#endif
 
 enum msm_vfe_iommu_type {
 	IOMMU_ATTACH,
@@ -313,6 +391,20 @@ enum msm_vfe_buff_queue_id {
 	VFE_BUF_QUEUE_MAX,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_vfe_axi_stream_cfg_update_info {
+	uint32_t stream_handle;
+	uint32_t output_format;
+	uint32_t user_stream_id;
+	enum msm_vfe_frame_skip_pattern skip_pattern;
+	struct msm_vfe_axi_plane_cfg plane_cfg[MAX_PLANES_PER_STREAM];
+};
+
+struct msm_vfe_axi_halt_cmd {
+	uint32_t stop_camif;
+	uint32_t overflow_detected;
+};
+#else
 struct msm_vfe_axi_stream_cfg_update_info {
 	uint32_t stream_handle;
 	uint32_t output_format;
@@ -328,6 +420,7 @@ struct msm_vfe_axi_halt_cmd {
 	uint32_t overflow_detected;
 	uint32_t blocking_halt;
 };
+#endif
 
 struct msm_vfe_axi_reset_cmd {
 	uint32_t blocking;
@@ -338,12 +431,20 @@ struct msm_vfe_axi_restart_cmd {
 	uint32_t enable_camif;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_vfe_axi_stream_update_cmd {
+	uint32_t num_streams;
+	enum msm_vfe_axi_stream_update_type update_type;
+	struct msm_vfe_axi_stream_cfg_update_info update_info[MAX_NUM_STREAM];
+};
+#else
 struct msm_vfe_axi_stream_update_cmd {
 	uint32_t num_streams;
 	enum msm_vfe_axi_stream_update_type update_type;
 	struct msm_vfe_axi_stream_cfg_update_info
 					update_info[MSM_ISP_STATS_MAX];
 };
+#endif
 
 struct msm_vfe_smmu_attach_cmd {
 	uint32_t security_mode;
@@ -447,11 +548,18 @@ struct msm_isp_buf_request {
 	enum msm_isp_buf_type buf_type;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_isp_qbuf_plane {
+	uint32_t addr;
+	uint32_t offset;
+};
+#else
 struct msm_isp_qbuf_plane {
 	uint32_t addr;
 	uint32_t offset;
 	uint32_t length;
 };
+#endif
 
 struct msm_isp_qbuf_buffer {
 	struct msm_isp_qbuf_plane planes[MAX_PLANES_PER_STREAM];
@@ -478,6 +586,23 @@ struct msm_vfe_axi_src_state {
 	uint32_t src_frame_id;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum msm_isp_event_idx {
+	ISP_REG_UPDATE      = 0,
+	ISP_EPOCH_0         = 1,
+	ISP_EPOCH_1         = 2,
+	ISP_START_ACK       = 3,
+	ISP_STOP_ACK        = 4,
+	ISP_IRQ_VIOLATION   = 5,
+	ISP_WM_BUS_OVERFLOW = 6,
+	ISP_STATS_OVERFLOW  = 7,
+	ISP_CAMIF_ERROR     = 8,
+	ISP_BUF_DONE        = 9,
+	ISP_FE_RD_DONE      = 10,
+	ISP_IOMMU_P_FAULT   = 11,
+	ISP_EVENT_MAX       = 12
+};
+#else
 enum msm_isp_event_idx {
 	ISP_REG_UPDATE        = 0,
 	ISP_EPOCH_0           = 1,
@@ -492,6 +617,7 @@ enum msm_isp_event_idx {
 	ISP_ERROR             = 10,
 	ISP_EVENT_MAX         = 11
 };
+#endif
 
 #define ISP_EVENT_OFFSET          8
 #define ISP_EVENT_BASE            (V4L2_EVENT_PRIVATE_START)
@@ -505,8 +631,14 @@ enum msm_isp_event_idx {
 #define ISP_EVENT_START_ACK       (ISP_EVENT_BASE + ISP_START_ACK)
 #define ISP_EVENT_STOP_ACK        (ISP_EVENT_BASE + ISP_STOP_ACK)
 #define ISP_EVENT_IRQ_VIOLATION   (ISP_EVENT_BASE + ISP_IRQ_VIOLATION)
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+#define ISP_EVENT_WM_BUS_OVERFLOW (ISP_EVENT_BASE + ISP_WM_BUS_OVERFLOW)
+#define ISP_EVENT_STATS_OVERFLOW  (ISP_EVENT_BASE + ISP_STATS_OVERFLOW)
+#define ISP_EVENT_CAMIF_ERROR     (ISP_EVENT_BASE + ISP_CAMIF_ERROR)
+#else
 #define ISP_EVENT_STATS_OVERFLOW  (ISP_EVENT_BASE + ISP_STATS_OVERFLOW)
 #define ISP_EVENT_ERROR           (ISP_EVENT_BASE + ISP_ERROR)
+#endif
 #define ISP_EVENT_SOF             (ISP_CAMIF_EVENT_BASE)
 #define ISP_EVENT_EOF             (ISP_CAMIF_EVENT_BASE + 1)
 #define ISP_EVENT_BUF_DONE        (ISP_EVENT_BASE + ISP_BUF_DONE)
@@ -539,6 +671,12 @@ struct msm_isp_stream_ack {
 	uint32_t handle;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_isp_error_info {
+	/* 1 << msm_isp_event_idx */
+	uint32_t error_mask;
+};
+#else
 enum msm_vfe_error_type {
 	ISP_ERROR_NONE,
 	ISP_ERROR_CAMIF,
@@ -560,7 +698,25 @@ struct msm_isp_output_info {
 	uint16_t stream_framedrop_mask;
 	uint32_t stats_framedrop_mask;
 };
+#endif
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_isp_event_data {
+	/*Wall clock except for buffer divert events
+	 *which use monotonic clock
+	 */
+	struct timeval timestamp;
+	/* Monotonic timestamp since bootup */
+	struct timeval mono_timestamp;
+	enum msm_vfe_input_src input_intf;
+	uint32_t frame_id;
+	union {
+		struct msm_isp_stats_event stats;
+		struct msm_isp_buf_event buf_done;
+		struct msm_isp_error_info error_info;
+	} u; /* union can have max 52 bytes */
+};
+#else
 struct msm_isp_event_data {
 	/*Wall clock except for buffer divert events
 	 *which use monotonic clock
@@ -576,7 +732,9 @@ struct msm_isp_event_data {
 		struct msm_isp_output_info output_info;
 	} u; /* union can have max 52 bytes */
 };
+#endif
 
+#ifndef CONFIG_CAMERA_DRIVER_VER_M
 #ifdef CONFIG_COMPAT
 struct msm_isp_event_data32 {
 	struct compat_timeval timestamp;
@@ -589,6 +747,7 @@ struct msm_isp_event_data32 {
 		struct msm_isp_output_info output_info;
 	} u;
 };
+#endif
 #endif
 
 #define V4L2_PIX_FMT_QBGGR8  v4l2_fourcc('Q', 'B', 'G', '8')
@@ -684,7 +843,9 @@ struct msm_isp_event_data32 {
 #define VIDIOC_MSM_ISP_FETCH_ENG_START \
 	_IOWR('V', BASE_VIDIOC_PRIVATE+20, struct msm_vfe_fetch_eng_start)
 
+#ifndef CONFIG_CAMERA_DRIVER_VER_M
 #define VIDIOC_MSM_ISP_DEQUEUE_BUF \
 	_IOWR('V', BASE_VIDIOC_PRIVATE+21, struct msm_isp_qbuf_info)
+#endif
 
 #endif /* __MSMB_ISP__ */

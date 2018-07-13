@@ -18,6 +18,7 @@
 #include <linux/swap.h>
 #include <linux/aio.h>
 #include <linux/falloc.h>
+#include <trace/events/mmcio.h>
 
 static const struct file_operations fuse_direct_io_file_operations;
 
@@ -65,9 +66,6 @@ struct fuse_file *fuse_file_alloc(struct fuse_conn *fc)
 		return NULL;
 
 	ff->rw_lower_file = NULL;
-	ff->shortcircuit_enabled = 0;
-	if (fc->shortcircuit_io)
-		ff->shortcircuit_enabled = 1;
 	ff->fc = fc;
 	ff->reserved_req = fuse_request_alloc(0);
 	if (unlikely(!ff->reserved_req)) {
@@ -990,7 +988,7 @@ static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			return err;
 	}
 
-	if (ff && ff->shortcircuit_enabled && ff->rw_lower_file)
+	if (ff && ff->rw_lower_file)
 		ret_val = fuse_shortcircuit_aio_read(iocb, iov, nr_segs, pos);
 	else
 		ret_val = generic_file_aio_read(iocb, iov, nr_segs, pos);
@@ -1228,6 +1226,7 @@ static ssize_t fuse_perform_write(struct file *file,
 	return res > 0 ? res : err;
 }
 
+extern void collect_io_stats(size_t rw_bytes, int type);
 static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 				   unsigned long nr_segs, loff_t pos)
 {
@@ -1254,6 +1253,7 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 
 	BUG_ON(iocb->ki_pos != pos);
 
+	trace_fuse_file_write(iocb->ki_filp->f_path.dentry, iocb->ki_left);
 	ocount = 0;
 	err = generic_segment_checks(iov, &nr_segs, &ocount, VERIFY_READ);
 	if (err)
@@ -1280,7 +1280,8 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	if (err)
 		goto out;
 
-	if (ff && ff->shortcircuit_enabled && ff->rw_lower_file) {
+	collect_io_stats(count, WRITE);
+	if (ff && ff->rw_lower_file) {
 		/* Use iocb->ki_pos instead of pos to handle the cases of files
 		 * that are opened with O_APPEND. For example if multiple
 		 * processes open the same file with O_APPEND then the
@@ -1878,9 +1879,6 @@ static const struct vm_operations_struct fuse_file_vm_ops = {
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct fuse_file *ff = file->private_data;
-
-	ff->shortcircuit_enabled = 0;
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
 		fuse_link_write_file(file);
 
@@ -1891,10 +1889,6 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int fuse_direct_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct fuse_file *ff = file->private_data;
-
-	ff->shortcircuit_enabled = 0;
-
 	/* Can't provide the coherency needed for MAP_SHARED */
 	if (vma->vm_flags & VM_MAYSHARE)
 		return -ENODEV;

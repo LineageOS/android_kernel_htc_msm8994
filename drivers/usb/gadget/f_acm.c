@@ -83,7 +83,9 @@ static unsigned int no_acm_smd_ports;
 static unsigned int nr_acm_ports;
 static unsigned int acm_next_free_port;
 
-#define GSERIAL_NO_PORTS 4
+/*++ 2014/09/23 USB Team, PCN00010 ++*/
+#define GSERIAL_NO_PORTS 8
+/*-- 2014/09/23 USB Team, PCN00010 --*/
 
 static struct acm_port_info {
 	enum transport_type	transport;
@@ -723,7 +725,9 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct usb_composite_dev *cdev = c->cdev;
 	struct f_acm		*acm = func_to_acm(f);
-	struct usb_string	*us;
+/*++ 2015/01/27 USB Team, PCN00069 ++*/
+	static struct usb_string	*us;
+/*-- 2015/01/27 USB Team, PCN00069 --*/
 	int			status;
 	struct usb_ep		*ep;
 
@@ -732,8 +736,12 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 	 */
 
 	/* maybe allocate device-global string IDs, and patch descriptors */
+/*++ 2015/01/27 USB Team, PCN00069 ++*/
+	/* Don't reset the ncm string ID */
+	if (!us)
 	us = usb_gstrings_attach(cdev, acm_strings,
 			ARRAY_SIZE(acm_string_defs));
+/*-- 2015/01/27 USB Team, PCN00069 --*/
 	if (IS_ERR(us))
 		return PTR_ERR(us);
 	acm_control_interface_desc.iInterface = us[ACM_CTRL_IDX].id;

@@ -41,18 +41,40 @@
 
 #define TIMEOUT_US		100
 #define MAX_GDSCR_READS		100
+#define MAX_GDSCR_READS_CFG		500
 
 enum gdscr_status {
 	ENABLED,
 	DISABLED,
 };
 
-static int poll_gdsc_status(void __iomem *gdscr, enum gdscr_status status)
+struct gdsc {
+	struct regulator_dev	*rdev;
+	struct regulator_desc	rdesc;
+	void __iomem		*gdscr;
+	struct clk		**clocks;
+	int			clock_count;
+	bool			toggle_mem;
+	bool			toggle_periph;
+	bool			toggle_logic;
+	bool			resets_asserted;
+	bool			root_en;
+	int			root_clk_idx;
+	void __iomem		*domain_addr;
+};
+
+static int poll_gdsc_status(struct gdsc *sc, enum gdscr_status status)
 {
-	int count;
+	int count, max_gdsc_reads;
 	u32 val;
-	for (count = MAX_GDSCR_READS; count > 0; count--) {
-		val = readl_relaxed(gdscr);
+
+	if (!strncmp(sc->rdesc.name, "gdsc_oxili_gx", 13))
+		max_gdsc_reads = MAX_GDSCR_READS_CFG;
+	else
+		max_gdsc_reads = MAX_GDSCR_READS;
+
+	for (count = max_gdsc_reads; count > 0; count--) {
+		val = readl_relaxed(sc->gdscr);
 		val &= PWR_ON_MASK;
 		switch (status) {
 		case ENABLED:
@@ -75,21 +97,6 @@ static int poll_gdsc_status(void __iomem *gdscr, enum gdscr_status status)
 	}
 	return -ETIMEDOUT;
 }
-
-struct gdsc {
-	struct regulator_dev	*rdev;
-	struct regulator_desc	rdesc;
-	void __iomem		*gdscr;
-	struct clk		**clocks;
-	int			clock_count;
-	bool			toggle_mem;
-	bool			toggle_periph;
-	bool			toggle_logic;
-	bool			resets_asserted;
-	bool			root_en;
-	int			root_clk_idx;
-	void __iomem		*domain_addr;
-};
 
 static int gdsc_is_enabled(struct regulator_dev *rdev)
 {
@@ -131,7 +138,7 @@ static int gdsc_enable(struct regulator_dev *rdev)
 		regval &= ~SW_COLLAPSE_MASK;
 		writel_relaxed(regval, sc->gdscr);
 
-		ret = poll_gdsc_status(sc->gdscr, ENABLED);
+		ret = poll_gdsc_status(sc, ENABLED);
 		if (ret) {
 			dev_err(&rdev->dev, "%s enable timed out: 0x%x\n",
 				sc->rdesc.name, regval);
@@ -194,7 +201,7 @@ static int gdsc_disable(struct regulator_dev *rdev)
 		regval |= SW_COLLAPSE_MASK;
 		writel_relaxed(regval, sc->gdscr);
 
-		ret = poll_gdsc_status(sc->gdscr, DISABLED);
+		ret = poll_gdsc_status(sc, DISABLED);
 		if (ret)
 			dev_err(&rdev->dev, "%s disable timed out: 0x%x\n",
 				sc->rdesc.name, regval);
@@ -276,7 +283,7 @@ static int gdsc_set_mode(struct regulator_dev *rdev, unsigned int mode)
 		 */
 		mb();
 		udelay(1);
-		ret = poll_gdsc_status(sc->gdscr, ENABLED);
+		ret = poll_gdsc_status(sc, ENABLED);
 		if (ret) {
 			dev_err(&rdev->dev, "%s set_mode timed out: 0x%x\n",
 				sc->rdesc.name, regval);
@@ -420,7 +427,7 @@ static int gdsc_probe(struct platform_device *pdev)
 		regval &= ~SW_COLLAPSE_MASK;
 		writel_relaxed(regval, sc->gdscr);
 
-		ret = poll_gdsc_status(sc->gdscr, ENABLED);
+		ret = poll_gdsc_status(sc, ENABLED);
 		if (ret) {
 			dev_err(&pdev->dev, "%s enable timed out: 0x%x\n",
 				sc->rdesc.name, regval);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -483,7 +483,7 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 		pr_err("Intf %d not in use\n", (inum + MDSS_MDP_INTF0));
 		return -ENODEV;
 	}
-	pr_debug("stop ctl=%d video Intf #%d base=%pK", ctl->num, ctx->intf_num,
+	pr_debug("stop ctl=%d video Intf #%d base=%p", ctl->num, ctx->intf_num,
 			ctx->base);
 
 	ret = mdss_mdp_video_ctx_stop(ctl, pinfo, ctx);
@@ -501,7 +501,7 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 			pr_err("Intf %d not in use\n", (inum + MDSS_MDP_INTF0));
 			return -ENODEV;
 		}
-		pr_debug("stop ctl=%d video Intf #%d base=%pK", ctl->num,
+		pr_debug("stop ctl=%d video Intf #%d base=%p", ctl->num,
 				ctx->intf_num, ctx->base);
 
 		ret = mdss_mdp_video_ctx_stop(ctl, pinfo, ctx);
@@ -666,14 +666,38 @@ static void recover_underrun_work(struct work_struct *work)
 static void mdss_mdp_video_underrun_intr_done(void *arg)
 {
 	struct mdss_mdp_ctl *ctl = arg;
+	struct mdss_mdp_perf_params *new_perf;
+	struct mdss_mdp_perf_params *cur_perf;
+
 	if (unlikely(!ctl))
 		return;
+
+	new_perf = &ctl->new_perf;
+	cur_perf = &ctl->cur_perf;
 
 	ctl->underrun_cnt++;
 	MDSS_XLOG(ctl->num, ctl->underrun_cnt);
 	trace_mdp_video_underrun_done(ctl->num, ctl->underrun_cnt);
-	pr_debug("display underrun detected for ctl=%d count=%d\n", ctl->num,
+	pr_err("display underrun detected for ctl=%d count=%d\n", ctl->num,
 			ctl->underrun_cnt);
+
+	if (new_perf) {
+		pr_err("=======Underrun New perf=======\n");
+		pr_err("ctl=%d clk_rate=%u\n", ctl->num, new_perf->mdp_clk_rate);
+		pr_err("bw_overlap=%llu bw_prefill=%llu prefill_bytes=%d\n",
+			 new_perf->bw_overlap, new_perf->bw_prefill, new_perf->prefill_bytes);
+	} else {
+		pr_err("=======Underrun New perf is NULL=======\n");
+	}
+
+	if (cur_perf) {
+		pr_err("=======Underrun cur perf=======\n");
+		pr_err("ctl=%d clk_rate=%u\n", ctl->num, cur_perf->mdp_clk_rate);
+		pr_err("bw_overlap=%llu bw_prefill=%llu prefill_bytes=%d\n",
+			 cur_perf->bw_overlap, cur_perf->bw_prefill, cur_perf->prefill_bytes);
+	} else {
+		pr_err("=======Underrun cur perf is NULL=======\n");
+	}
 
 	if (ctl->opmode & MDSS_MDP_CTL_OP_PACK_3D_ENABLE)
 		schedule_work(&ctl->recover_work);
@@ -1293,7 +1317,7 @@ static int mdss_mdp_video_intfs_setup(struct mdss_mdp_ctl *ctl,
 					(inum + MDSS_MDP_INTF0));
 			return -EBUSY;
 		}
-		pr_debug("video Intf #%d base=%pK", ctx->intf_num, ctx->base);
+		pr_debug("video Intf #%d base=%p", ctx->intf_num, ctx->base);
 		ctx->ref_cnt++;
 	} else {
 		pr_err("Invalid intf number: %d\n", (inum + MDSS_MDP_INTF0));
@@ -1323,7 +1347,7 @@ static int mdss_mdp_video_intfs_setup(struct mdss_mdp_ctl *ctl,
 					(inum + MDSS_MDP_INTF0));
 			return -EBUSY;
 		}
-		pr_debug("video Intf #%d base=%pK", ctx->intf_num, ctx->base);
+		pr_debug("video Intf #%d base=%p", ctx->intf_num, ctx->base);
 		ctx->ref_cnt++;
 
 		ctl->intf_ctx[SLAVE_CTX] = ctx;

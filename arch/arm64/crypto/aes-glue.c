@@ -101,7 +101,7 @@ static int ecb_encrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	unsigned int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -123,7 +123,7 @@ static int ecb_decrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	unsigned int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -145,7 +145,7 @@ static int cbc_encrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	unsigned int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -168,7 +168,7 @@ static int cbc_decrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	unsigned int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -191,7 +191,7 @@ static int ctr_encrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -237,7 +237,7 @@ static int xts_encrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_xts_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key1.key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	unsigned int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -261,7 +261,7 @@ static int xts_decrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 {
 	struct crypto_aes_xts_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
 	int err, first, rounds = 6 + ctx->key1.key_length / 4;
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	unsigned int blocks;
 
 	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;

@@ -61,6 +61,9 @@
 #include <linux/migrate.h>
 #include <linux/string.h>
 #include <linux/bug.h>
+#include <linux/memblock.h>
+#include <linux/memory.h>
+#include <linux/mm_types.h>
 
 #include <asm/io.h>
 #include <asm/pgalloc.h>
@@ -652,6 +655,54 @@ static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss)
 			add_mm_counter(mm, i, rss[i]);
 }
 
+static bool is_similar_page(struct page* p, pgoff_t index,
+		struct address_space** maps, size_t map_count)
+{
+	if (unlikely(p->index == index))
+		for (; map_count > 0; map_count--, maps++)
+			if (*maps && p->mapping == *maps)
+				return true;
+
+	return false;
+}
+
+static void debug_scan_page(struct vm_area_struct *vma, pgoff_t index)
+{
+	struct memblock_region *reg;
+	struct address_space *maps[] = {
+		vma->vm_file ? vma->vm_file->f_mapping : NULL,
+		vma->anon_vma ? (void *) vma->anon_vma + PAGE_MAPPING_ANON : NULL,
+	};
+
+	for_each_memblock(memory, reg) {
+		unsigned long start = memblock_region_memory_base_pfn(reg);
+		unsigned long end = memblock_region_memory_end_pfn(reg);
+
+		while (start < end) {
+			struct page* p = pfn_to_page(start++);
+			if (is_similar_page(p, index, maps, ARRAY_SIZE(maps)))
+				pr_warn_ratelimited("%s: found similar page: %p paddr=%p\n",
+						__func__,
+						p, (void*) page_to_phys(p));
+		}
+	}
+}
+
+static void debug_dump_pmd(pmd_t *pmd, unsigned long addr)
+{
+	const size_t pte_sz = sizeof(long);
+	const size_t pmd_sz = pte_sz * PTRS_PER_PMD;
+
+	unsigned long ptep = (unsigned long) pte_offset_map(pmd, addr);
+	unsigned long ptep_end = round_up(ptep + 1, pmd_sz);
+
+	print_hex_dump(KERN_ERR, "pmd-", DUMP_PREFIX_ADDRESS,
+			pte_sz * 4, pte_sz, (void*) ptep,
+			min(ptep_end - ptep, pte_sz * 8), 1);
+
+	pte_unmap((pte_t*) ptep);
+}
+
 /*
  * This function is called to print an error when a bad pte
  * is found. For example, we might have a PFN-mapped pte in
@@ -713,6 +764,8 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
 		printk(KERN_ALERT "vma->vm_file->f_op->mmap: %pSR\n",
 		       vma->vm_file->f_op->mmap);
 
+	debug_dump_pmd(pmd, addr);
+	debug_scan_page(vma, index);
 	BUG_ON(PANIC_CORRUPTION);
 
 	dump_stack();

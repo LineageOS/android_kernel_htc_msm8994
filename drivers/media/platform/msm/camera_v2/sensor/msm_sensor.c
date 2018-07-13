@@ -17,9 +17,52 @@
 #include "msm_camera_i2c_mux.h"
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
+/*HTC_START*/
+#ifdef CONFIG_OIS_CALIBRATION
+#include "lc898123F40_htc.h"
+#endif
+/*HTC_END*/
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
+
+/*HTC_START*/
+#ifdef CONFIG_OIS_CALIBRATION
+
+#define OIS_COMPONENT_I2C_ADDR_WRITE 0x7C
+
+int htc_ois_calibration(struct msm_sensor_ctrl_t *s_ctrl, int cam_id)
+{
+	int rc = -1;
+	uint16_t cci_client_sid_backup;
+    pr_info("[OIS_Cali]%s:E \n", __func__);
+
+	/* Bcakup the I2C slave address */
+	cci_client_sid_backup = s_ctrl->sensor_i2c_client->cci_client->sid;
+
+	/* Replace the I2C slave address with OIS component */
+	s_ctrl->sensor_i2c_client->cci_client->sid = OIS_COMPONENT_I2C_ADDR_WRITE >> 1;
+
+    /*GYRO calibration*/
+    rc = htc_ext_GyroReCalib(s_ctrl, cam_id);
+    if (rc != 0)
+          pr_err("[OIS_Cali]htc_GyroReCalib fail.\n");
+    else{
+        /*rc = htc_ext_WrGyroOffsetData();
+        if (rc != 0)
+            pr_err("[OIS_Cali]htc_WrGyroOffsetData fail.\n");
+        else
+            pr_info("[OIS_Cali]Gyro calibration success.\n");*/
+        pr_info("[OIS_Cali]Skip OIS flash memory.\n");
+    }
+
+	/* Restore the I2C slave address */
+	s_ctrl->sensor_i2c_client->cci_client->sid = cci_client_sid_backup;
+
+	return rc;
+}
+#endif
+/*HTC_END*/
 
 static struct v4l2_file_operations msm_sensor_v4l2_subdev_fops;
 static void msm_sensor_adjust_mclk(struct msm_camera_power_ctrl_t *ctrl)
@@ -627,7 +670,16 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 	case VIDIOC_MSM_SENSOR_CFG:
 #ifdef CONFIG_COMPAT
 		if (is_compat_task())
-			rc = s_ctrl->func_tbl->sensor_config32(s_ctrl, argp);
+		//HTC_CAM_START
+		#if 0
+				rc = s_ctrl->func_tbl->sensor_config32(s_ctrl, argp);
+		#else
+		{
+			if(s_ctrl->func_tbl->sensor_config32)
+				rc = s_ctrl->func_tbl->sensor_config32(s_ctrl, argp);
+        }
+        #endif
+		//HTC_CAM_END
 		else
 #endif
 			rc = s_ctrl->func_tbl->sensor_config(s_ctrl, argp);
@@ -663,8 +715,53 @@ long msm_sensor_subdev_fops_ioctl(struct file *file,
 	return video_usercopy(file, cmd, arg, msm_sensor_subdev_do_ioctl);
 }
 
+//HTC_CAM_START
+#ifdef CONFIG_COMPAT
+static int sensor_config_read_pdaf_data32(struct msm_sensor_ctrl_t *s_ctrl,
+	void __user *arg)
+{
+	int rc = -EINVAL;
+	struct msm_camera_power_ctrl_t *power_info;
+	struct msm_camera_i2c_client *sensor_i2c_client;
+	power_info = &s_ctrl->sensordata->power_info;
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+
+	rc = msm_camera_power_up(power_info, s_ctrl->sensor_device_type, sensor_i2c_client);
+	if (rc < 0) {
+		pr_err("[CAM_PDAF]failed rc %d\n", rc);
+		goto power_down;
+	}
+
+	if (s_ctrl->func_tbl->sensor_i2c_read_pdaf_data32 == NULL) {
+		rc = -EFAULT;
+		return rc;
+	}
+	rc = s_ctrl->func_tbl->sensor_i2c_read_pdaf_data32(arg, s_ctrl);
+	if (rc < 0) {
+		pr_err("[CAM_PDAF]Read pdaf data failed\n");
+		goto power_down;
+	}
+
+	/*e_ctrl->is_supported |= msm_eeprom_match_crc(&e_ctrl->cal_data);
+	CDBG("e_ctrl is supported %d\n", e_ctrl->is_supported);*/
+	rc = msm_camera_power_down(power_info, s_ctrl->sensor_device_type, sensor_i2c_client);
+	if (rc < 0)
+		pr_err("[CAM_PDAF]failed rc %d\n", rc);
+	return rc;
+power_down:
+	msm_camera_power_down(power_info, s_ctrl->sensor_device_type, sensor_i2c_client);
+	return rc;
+}
+#endif
+
+#if 0
 static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 	void __user *argp)
+#else
+int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
+	void __user *argp)
+#endif
+//HTC_CAM_END
 {
 	struct sensorb_cfg_data32 *cdata = (struct sensorb_cfg_data32 *)argp;
 	int32_t rc = 0;
@@ -981,6 +1078,45 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		}
 		break;
 	}
+/* HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+	case CFG_I2C_IOCTL_R_OTP:
+		if (s_ctrl->func_tbl->sensor_i2c_read_fuseid32 == NULL) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = s_ctrl->func_tbl->sensor_i2c_read_fuseid32(cdata, s_ctrl);
+	break;
+/* HTC_END, HTC_VCM*/
+/* HTC_START, read camera emmc*/
+	case CFG_I2C_IOCTL_R_EMMC:
+		if (s_ctrl->func_tbl->sensor_i2c_read_emmc32 == NULL) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = s_ctrl->func_tbl->sensor_i2c_read_emmc32(cdata);
+	break;
+/* HTC_END*/
+/*HTC_START GYRO calibration*/
+    case CFG_SET_GYRO_CALIBRATION:
+#ifdef CONFIG_OIS_CALIBRATION
+        rc = htc_ois_calibration(s_ctrl, s_ctrl->sensordata->sensor_info->position);
+#else
+        rc = 0;
+#endif
+    break;
+/*HTC_END*/
+/*HTC_START Get PDAF data*/
+    case CFG_GET_PDAF_SIZE:
+		if (s_ctrl->func_tbl->sensor_i2c_get_pdaf_size32 == NULL) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = s_ctrl->func_tbl->sensor_i2c_get_pdaf_size32(cdata, s_ctrl);
+    break;
+    case CFG_READ_PDAF_DATA:
+		rc = sensor_config_read_pdaf_data32(s_ctrl, cdata);
+    break;
+/*HTC_END*/
 
 	default:
 		rc = -EFAULT;
@@ -1367,6 +1503,41 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		}
 		break;
 	}
+/* HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
+	case CFG_I2C_IOCTL_R_OTP:
+		if (s_ctrl->func_tbl->sensor_i2c_read_fuseid == NULL) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = s_ctrl->func_tbl->sensor_i2c_read_fuseid(cdata, s_ctrl);
+	break;
+/* HTC_END, HTC_VCM*/
+/* HTC_START, read camera emmc*/
+	case CFG_I2C_IOCTL_R_EMMC:
+		if (s_ctrl->func_tbl->sensor_i2c_read_emmc == NULL) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = s_ctrl->func_tbl->sensor_i2c_read_emmc(cdata);
+	break;
+/* HTC_END*/
+/*HTC_START GYRO calibration*/
+    case CFG_SET_GYRO_CALIBRATION:
+#ifdef CONFIG_OIS_CALIBRATION
+        rc = htc_ois_calibration(s_ctrl, s_ctrl->sensordata->sensor_info->position);
+#else
+        rc = 0;
+#endif
+    break;
+/*HTC_END*/
+/*HTC_START Get PDAF data*/
+    case CFG_GET_PDAF_SIZE:
+        rc = 0;
+    break;
+    case CFG_READ_PDAF_DATA:
+        rc = 0;
+    break;
+/*HTC_END*/
 	default:
 		rc = -EFAULT;
 		break;
@@ -1444,6 +1615,9 @@ static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl = {
 	.i2c_read_seq = msm_camera_cci_i2c_read_seq,
 	.i2c_write = msm_camera_cci_i2c_write,
 	.i2c_write_table = msm_camera_cci_i2c_write_table,
+/* HTC_START */
+	.i2c_write_seq = msm_camera_cci_i2c_write_seq,
+/* HTC_END */
 	.i2c_write_seq_table = msm_camera_cci_i2c_write_seq_table,
 	.i2c_write_table_w_microdelay =
 		msm_camera_cci_i2c_write_table_w_microdelay,
@@ -1456,6 +1630,9 @@ static struct msm_camera_i2c_fn_t msm_sensor_qup_func_tbl = {
 	.i2c_read_seq = msm_camera_qup_i2c_read_seq,
 	.i2c_write = msm_camera_qup_i2c_write,
 	.i2c_write_table = msm_camera_qup_i2c_write_table,
+/* HTC_START */
+	.i2c_write_seq = msm_camera_qup_i2c_write_seq,
+/* HTC_END */
 	.i2c_write_seq_table = msm_camera_qup_i2c_write_seq_table,
 	.i2c_write_table_w_microdelay =
 		msm_camera_qup_i2c_write_table_w_microdelay,
@@ -1497,6 +1674,9 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 		s_ctrl->sensordata->slave_info->sensor_slave_addr >> 1;
 	cci_client->retries = 3;
 	cci_client->id_map = 0;
+	/*HTC_START*/
+	cci_client->i2c_freq_mode = I2C_FAST_MODE;
+	/*HTC_END*/
 	if (!s_ctrl->func_tbl)
 		s_ctrl->func_tbl = &msm_sensor_func_tbl;
 	if (!s_ctrl->sensor_i2c_client->i2c_func_tbl)
@@ -1545,10 +1725,34 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 	s_ctrl->msm_sd.sd.entity.flags = mount_pos | MEDIA_ENT_FL_DEFAULT;
 
 	rc = camera_init_v4l2(&s_ctrl->pdev->dev, &session_id);
+	//HTC_SATRT, add error handle
+	if (rc < 0) {
+		pr_err("%s: camera_init_v4l2 failed rc = %d\n", __func__, rc);
+		s_ctrl->func_tbl->sensor_power_down(s_ctrl);
+		kfree(s_ctrl->sensordata->power_info.clk_info);
+		kfree(cci_client);
+		return rc;
+	}
+	//HTC_END
+
 	CDBG("%s rc %d session_id %d\n", __func__, rc, session_id);
 	s_ctrl->sensordata->sensor_info->session_id = session_id;
 	s_ctrl->msm_sd.close_seq = MSM_SD_CLOSE_2ND_CATEGORY | 0x3;
+	//HTC_SATRT, add error handle
+	#if 0
 	msm_sd_register(&s_ctrl->msm_sd);
+	#else
+	rc = msm_sd_register(&s_ctrl->msm_sd);
+	if (rc < 0) {
+		pr_err("%s: msm_sd_register failed rc = %d\n", __func__, rc);
+		s_ctrl->func_tbl->sensor_power_down(s_ctrl);
+		kfree(s_ctrl->sensordata->power_info.clk_info);
+		kfree(cci_client);
+		return rc;
+	}
+	#endif
+	//HTC_END
+
 	msm_sensor_v4l2_subdev_fops = v4l2_subdev_fops;
 #ifdef CONFIG_COMPAT
 	msm_sensor_v4l2_subdev_fops.compat_ioctl32 =
@@ -1764,3 +1968,71 @@ FREE_CCI_CLIENT:
 	kfree(cci_client);
 	return rc;
 }
+
+/*HTC_START*/
+#include <linux/fs.h>
+#include <linux/file.h>
+#include <linux/vmalloc.h>
+#include <asm/segment.h>
+#include <asm/uaccess.h>
+#include <linux/buffer_head.h>
+
+void msm_fclose(struct file* file) {
+    filp_close(file, NULL);
+}
+
+int msm_fwrite(struct file* file, unsigned long long offset, unsigned char* data, unsigned int size) {
+    mm_segment_t oldfs;
+    int ret;
+
+    oldfs = get_fs();
+    set_fs(get_ds());
+
+    ret = vfs_write(file, data, size, &offset);
+
+    set_fs(oldfs);
+    return ret;
+}
+
+struct file* msm_fopen(const char* path, int flags, int rights) {
+    struct file* filp = NULL;
+    mm_segment_t oldfs;
+    int err = 0;
+
+    oldfs = get_fs();
+    set_fs(get_ds());
+    filp = filp_open(path, flags, rights);
+    set_fs(oldfs);
+    if(IS_ERR(filp)) {
+        err = PTR_ERR(filp);
+    pr_err("[CAM]File Open Error:%s",path);
+        return NULL;
+    }
+    if(!filp->f_op){
+    pr_err("[CAM]File Operation Method Error!!");
+    return NULL;
+    }
+
+    return filp;
+}
+
+uint32_t msm_sensor_get_boardinfo(struct device_node *of_node)
+{
+    uint32_t boardinfo = 0;   //set as 1 after XC board
+    if (0 > of_property_read_u32(of_node, "qcom,b3-image", &boardinfo))
+    {
+        boardinfo = 0;
+    }
+    return boardinfo;
+}
+
+uint32_t msm_sensor_get_pdaf_flag(struct device_node *of_node)
+{
+    uint32_t pdaf_flag = 0;
+    if (0 > of_property_read_u32(of_node, "qcom,pdaf-driverIC", &pdaf_flag))
+    {
+        pdaf_flag = 0;
+    }
+    return pdaf_flag;
+}
+/*HTC_END*/

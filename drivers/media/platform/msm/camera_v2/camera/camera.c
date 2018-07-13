@@ -26,6 +26,7 @@
 #include <linux/msm_ion.h>
 #include <linux/iommu.h>
 #include <linux/platform_device.h>
+#include <linux/spmi.h>    /* HTC_duncan */
 #include <media/v4l2-fh.h>
 
 #include "camera.h"
@@ -547,6 +548,9 @@ static int camera_v4l2_open(struct file *filep)
 	struct msm_video_device *pvdev = video_drvdata(filep);
 	unsigned int opn_idx, idx;
 	BUG_ON(!pvdev);
+	pr_info("%s: E\n", __func__); /* HTC_sungfeng */
+
+	pr_info("%s : pmic_version = %d\n", __func__, htc_print_pmic_version()); /* HTC_duncan */
 
 	rc = camera_v4l2_fh_open(filep);
 	if (rc < 0) {
@@ -614,6 +618,8 @@ static int camera_v4l2_open(struct file *filep)
 	idx |= (1 << find_first_zero_bit((const unsigned long *)&opn_idx,
 				MSM_CAMERA_STREAM_CNT_BITS));
 	atomic_cmpxchg(&pvdev->opened, opn_idx, idx);
+
+	pr_info("%s: X, opened %d\n", __func__, atomic_read(&pvdev->opened)); /* HTC_sungfeng */
 	return rc;
 
 post_fail:
@@ -652,6 +658,7 @@ static int camera_v4l2_close(struct file *filep)
 	struct camera_v4l2_private *sp = fh_to_private(filep->private_data);
 	unsigned int opn_idx, mask;
 	BUG_ON(!pvdev);
+	pr_info("%s: E\n", __func__); /* HTC_sungfeng */
 
 	opn_idx = atomic_read(&pvdev->opened);
 	pr_debug("%s: close stream_id=%d\n", __func__, sp->stream_id);
@@ -692,6 +699,7 @@ static int camera_v4l2_close(struct file *filep)
 	camera_v4l2_vb2_q_release(filep);
 	camera_v4l2_fh_release(filep);
 
+	pr_info("%s: X, opened %d\n", __func__, atomic_read(&pvdev->opened)); /* HTC_sungfeng */
 	return rc;
 }
 
@@ -765,6 +773,9 @@ int camera_init_v4l2(struct device *dev, unsigned int *session)
 	pvdev->vdev->v4l2_dev = v4l2_dev;
 
 	rc = v4l2_device_register(dev, pvdev->vdev->v4l2_dev);
+	//HTC_START
+	pr_info("%s: v4l2_device_register done\n", __func__);
+	//HTC_END
 	if (WARN_ON(rc < 0))
 		goto register_fail;
 

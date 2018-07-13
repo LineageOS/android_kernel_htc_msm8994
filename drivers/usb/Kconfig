@@ -89,6 +89,8 @@ source "drivers/usb/image/Kconfig"
 
 endif
 
+source "drivers/usb/fusb302/Kconfig"
+
 source "drivers/usb/dwc3/Kconfig"
 
 source "drivers/usb/chipidea/Kconfig"

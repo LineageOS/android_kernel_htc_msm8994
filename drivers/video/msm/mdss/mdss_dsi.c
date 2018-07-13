@@ -23,6 +23,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/leds-qpnp-wled.h>
 #include <linux/clk.h>
+#include <linux/debug_display.h>
 
 #include "mdss.h"
 #include "mdss_panel.h"
@@ -31,6 +32,7 @@
 
 #define XO_CLK_RATE	19200000
 
+struct mdss_dsi_pwrctrl pwrctrl_pdata;
 static struct dsi_drv_cm_data shared_ctrl_data;
 
 static int mdss_dsi_pinctrl_set_state(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
@@ -135,6 +137,12 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
+	/* HTC: use board specific hook to override default call */
+	if (pwrctrl_pdata.dsi_regulator_init)
+		pwrctrl_pdata.dsi_regulator_init(pdev);
+	else
+		PR_DISP_INFO("%s: not use HTC pwrctrl hook\n", __func__);
+
 	for (i = 0; !rc && (i < DSI_MAX_PM); i++) {
 		rc = msm_dss_config_vreg(&pdev->dev,
 			ctrl_pdata->power_data[i].vreg_config,
@@ -164,10 +172,22 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+	/* HTC: On Dual DSI, We can skip dsi1 panel power control */
+	if (ctrl_pdata->ndx) {
+		pr_debug("%s: Skip DSI1 power control\n", __func__);
+		return 0;
+	}
+
 	ret = mdss_dsi_panel_reset(pdata, 0);
 	if (ret) {
 		pr_warn("%s: Panel reset failed. rc=%d\n", __func__, ret);
 		ret = 0;
+	}
+
+	if (pwrctrl_pdata.dsi_power_off) {
+		ret = pwrctrl_pdata.dsi_power_off(pdata);
+		if (ret)
+			PR_DISP_ERR("power off sequence with Error");
 	}
 
 	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
@@ -197,6 +217,10 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 				__func__, __mdss_dsi_pm_name(i));
 	}
 
+	//TODO: move to pwrctrl
+	if (gpio_is_valid(ctrl_pdata->lcmio_1v8_en))
+		gpio_set_value((ctrl_pdata->lcmio_1v8_en), 0);
+
 end:
 	return ret;
 }
@@ -206,6 +230,7 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	int i = 0;
+	int rc = 0;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -214,6 +239,16 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+
+	/* HTC: On Dual DSI, We can skip dsi1 panel power control */
+	if (ctrl_pdata->ndx) {
+		pr_debug("%s: Skip DSI1 power control\n", __func__);
+		return 0;
+	}
+
+	//TODO: move to pwrctrl
+	if (gpio_is_valid(ctrl_pdata->lcmio_1v8_en))
+		gpio_set_value((ctrl_pdata->lcmio_1v8_en), 1);
 
 	for (i = 0; i < DSI_MAX_PM; i++) {
 		/*
@@ -239,7 +274,6 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		/* Add delay recommended by panel specs */
 		udelay(2000);
 	}
-
 	i--;
 
 	/*
@@ -248,8 +282,9 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	 * bootloader. This needs to be done irresepective of whether
 	 * the lp11_init flag is set or not.
 	 */
-	if (pdata->panel_info.cont_splash_enabled ||
-		!pdata->panel_info.mipi.lp11_init) {
+	if (!pdata->panel_info.skip_first_pinctl &&
+		(pdata->panel_info.cont_splash_enabled ||
+		!pdata->panel_info.mipi.lp11_init)) {
 		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
 			pr_debug("reset enable: pinctrl not enabled\n");
 
@@ -258,6 +293,17 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 			pr_err("%s: Panel reset failed. rc=%d\n",
 					__func__, ret);
 	}
+
+	/*Htc Specific hook function*/
+	if (pwrctrl_pdata.dsi_power_on) {
+		rc = pwrctrl_pdata.dsi_power_on(pdata);
+		if (rc)
+			PR_DISP_ERR("turn on power sequence with Error\n")
+	} else
+		PR_DISP_INFO("%s: not use HTC pwrctrl hook\n", __func__);
+
+	if (pdata->panel_info.skip_first_pinctl)
+		pdata->panel_info.skip_first_pinctl = false;
 
 error:
 	if (ret) {
@@ -584,6 +630,9 @@ panel_power_ctrl:
 		pr_err("%s: Panel power off failed\n", __func__);
 		goto end;
 	}
+
+	if (pdata->panel_info.first_power_on == 1)
+		pdata->panel_info.first_power_on = 0;
 
 	if (panel_info->dynamic_fps
 	    && (panel_info->dfps_update == DFPS_SUSPEND_RESUME_MODE)
@@ -1612,7 +1661,7 @@ static struct device_node *mdss_dsi_find_panel_of_node(
 {
 	int len, i;
 	int ctrl_id = pdev->id - 1;
-	char panel_name[MDSS_MAX_PANEL_LEN];
+	char panel_name[MDSS_MAX_PANEL_LEN] = "";
 	char ctrl_id_stream[3] =  "0:";
 	char *stream = NULL, *pan = NULL, *override_cfg = NULL;
 	struct device_node *dsi_pan_node = NULL, *mdss_node = NULL;
@@ -1978,6 +2027,39 @@ static int mdss_dsi_irq_init(struct device *dev, int irq_no,
 	return ret;
 }
 
+static void mdss_dsi_parse_rgb_gain(struct cali_gain *gain)
+{
+	struct device_node *disp_cali_offset;
+	char *disp_cali_data = NULL;
+	int disp_cali_size = 0;
+
+	disp_cali_offset = of_find_node_by_path(CALIBRATION_DATA_PATH);
+	if (disp_cali_offset) {
+		disp_cali_data = (char *) of_get_property(disp_cali_offset,
+				DISP_FLASH_DATA, &disp_cali_size);
+		pr_info("%s: disp_cali_size = %d\n", __func__, disp_cali_size);
+
+		if (disp_cali_data && (disp_cali_size == DISP_FLASH_DATA_SIZE)) {
+			/* RGB brightness calibration data */
+			int i;
+			uint16_t tmp[LIGHT_CALI_SIZE/2];
+			for (i = 0; i < LIGHT_CALI_SIZE/2; i++) {
+				tmp[i] = disp_cali_data[LIGHT_CALI_OFFSET+(i*2)] +
+					(disp_cali_data[LIGHT_CALI_OFFSET+(i*2)+1] << 8);
+				pr_info("%s: PA[%d] = 0x%x\n", __func__, i, tmp[i]);
+			}
+			gain->BKL = tmp[LIGHT_RATIO_INDEX];
+			gain->R = tmp[LIGHT_R_INDEX];
+			gain->G = tmp[LIGHT_G_INDEX];
+			gain->B = tmp[LIGHT_B_INDEX];
+			pr_info("%s: R = 0x%x, G = 0x%x B = 0x%x BL=%d \n", __func__,
+				gain->R, gain->G, gain->B, gain->BKL);
+		} else
+			pr_info("%s: disp_cali data less\n", __func__);
+	} else
+			pr_info("%s: No disp_cali data\n", __func__);
+}
+
 int dsi_panel_device_register(struct device_node *pan_node,
 				struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -2137,6 +2219,20 @@ int dsi_panel_device_register(struct device_node *pan_node,
 		ctrl_pdata->mode_gpio = -EINVAL;
 	}
 
+	//TODO: move to pwrctrl
+	ctrl_pdata->lcmio_1v8_en = of_get_named_gpio(ctrl_pdev->dev.of_node,
+			 "htc,lcmio_1v8_en-gpio", 0);
+	if (!gpio_is_valid(ctrl_pdata->lcmio_1v8_en))
+		pr_err("%s:%d, lcmio 1v8 gpio not specified\n",
+						__func__, __LINE__);
+	if (gpio_is_valid(ctrl_pdata->lcmio_1v8_en)) {
+		if (gpio_request(ctrl_pdata->lcmio_1v8_en, "lcmio_1v8_en")) {
+			pr_err("request lcmio_1v8_en gpio failed, rc=%d\n", rc);
+			gpio_free(ctrl_pdata->lcmio_1v8_en);
+		}
+	}
+	mdss_dsi_parse_rgb_gain(&ctrl_pdata->cali_gain);
+
 	ctrl_pdata->timing_db_mode = of_property_read_bool(
 		ctrl_pdev->dev.of_node, "qcom,timing-db-mode");
 
@@ -2290,7 +2386,7 @@ static int __init mdss_dsi_driver_init(void)
 
 	ret = mdss_dsi_register_driver();
 	if (ret) {
-		pr_err("mdss_dsi_register_driver() failed!\n");
+		PR_DISP_ERR("mdss_dsi_register_driver() failed!\n");
 		return ret;
 	}
 

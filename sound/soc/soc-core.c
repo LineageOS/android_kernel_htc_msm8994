@@ -65,7 +65,7 @@ static LIST_HEAD(component_list);
  * It can be used to eliminate pops between different playback streams, e.g.
  * between two audio tracks.
  */
-static int pmdown_time = 5000;
+static int pmdown_time;
 module_param(pmdown_time, int, 0);
 MODULE_PARM_DESC(pmdown_time, "DAPM stream powerdown time (msecs)");
 
@@ -2103,13 +2103,14 @@ unsigned int snd_soc_read(struct snd_soc_codec *codec, unsigned int reg)
 {
 	unsigned int ret;
 
-	if (codec->read) {
+        if (codec->read) {
 		ret = codec->read(codec, reg);
 		dev_dbg(codec->dev, "read %x => %x\n", reg, ret);
 		trace_snd_soc_reg_read(codec, reg, ret);
-	} else {
-		ret = -EIO;
-	}
+        }
+        else
+		ret = -1;
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_read);
@@ -2121,9 +2122,9 @@ unsigned int snd_soc_write(struct snd_soc_codec *codec,
 		dev_dbg(codec->dev, "write %x = %x\n", reg, val);
 		trace_snd_soc_reg_write(codec, reg, val);
 		return codec->write(codec, reg, val);
-	} else {
-		return -EIO;
-	}
+        }
+	else
+		return -1;
 }
 EXPORT_SYMBOL_GPL(snd_soc_write);
 
@@ -2307,6 +2308,7 @@ static int snd_soc_add_controls(struct snd_card *card, struct device *dev,
 		const struct snd_kcontrol_new *control = &controls[i];
 		err = snd_ctl_add(card, snd_soc_cnew(control, data,
 						     control->name, prefix));
+		dev_dbg(dev, "ASoC: add %s\n",control->name);  //htc audio
 		if (err < 0) {
 			dev_err(dev, "ASoC: Failed to add %s: %d\n",
 				control->name, err);
@@ -2419,8 +2421,11 @@ int snd_soc_info_enum_double(struct snd_kcontrol *kcontrol,
 
 	if (uinfo->value.enumerated.item > e->max - 1)
 		uinfo->value.enumerated.item = e->max - 1;
-	strcpy(uinfo->value.enumerated.name,
-		e->texts[uinfo->value.enumerated.item]);
+	/* htc_aud_mod ++ */
+	strlcpy(uinfo->value.enumerated.name,
+		e->texts[uinfo->value.enumerated.item],
+		sizeof(uinfo->value.enumerated.name));
+	/* htc_aud_mod -- */
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_info_enum_double);
@@ -2579,8 +2584,11 @@ int snd_soc_info_enum_ext(struct snd_kcontrol *kcontrol,
 
 	if (uinfo->value.enumerated.item > e->max - 1)
 		uinfo->value.enumerated.item = e->max - 1;
-	strcpy(uinfo->value.enumerated.name,
-		e->texts[uinfo->value.enumerated.item]);
+	/* htc_aud_mod ++ */
+	strlcpy(uinfo->value.enumerated.name,
+		e->texts[uinfo->value.enumerated.item],
+		sizeof(uinfo->value.enumerated.name));
+	/* htc_aud_mod -- */
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_info_enum_ext);

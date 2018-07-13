@@ -40,11 +40,20 @@ enum pon_trigger_source {
  * %PON_POWER_OFF_WARM_RESET:	Reset the MSM but not all PMIC peripherals
  * %PON_POWER_OFF_SHUTDOWN:	Shutdown the MSM and PMIC completely
  * %PON_POWER_OFF_HARD_RESET:	Reset the MSM and all PMIC peripherals
+ * %PON_POWER_OFF_DVDD_HARD_RESET:	Do dVdd hard reset for MSM all pmics.
  */
 enum pon_power_off_type {
 	PON_POWER_OFF_WARM_RESET	= 0x01,
 	PON_POWER_OFF_SHUTDOWN		= 0x04,
 	PON_POWER_OFF_HARD_RESET	= 0x07,
+	PON_POWER_OFF_DVDD_HARD_RESET	= 0x08,
+};
+
+enum pon_type {
+	PON_KPDPWR,
+	PON_RESIN,
+	PON_CBLPWR,
+	PON_KPDPWR_RESIN,
 };
 
 enum pon_restart_reason {
@@ -59,8 +68,14 @@ int qpnp_pon_system_pwr_off(enum pon_power_off_type type);
 int qpnp_pon_is_warm_reset(void);
 int qpnp_pon_trigger_config(enum pon_trigger_source pon_src, bool enable);
 int qpnp_pon_wd_config(bool enable);
+
+#ifdef CONFIG_KPDPWR_S2_DVDD_RESET
+int qpnp_config_reset_enable(int pon_type, int en);
+int qpnp_get_reset_en(int pon_type);
+#endif /* CONFIG_KPDPWR_S2_DVDD_RESET */
 int qpnp_pon_set_restart_reason(enum pon_restart_reason reason);
 bool qpnp_pon_check_hard_reset_stored(void);
+int downgrade_hvdcp_9v_to_5v(void);
 
 #else
 static int qpnp_pon_system_pwr_off(enum pon_power_off_type type)
@@ -77,6 +92,18 @@ int qpnp_pon_wd_config(bool enable)
 {
 	return -ENODEV;
 }
+
+#ifdef CONFIG_KPDPWR_S2_DVDD_RESET
+static inline int qpnp_config_reset_enable(int pon_type, int en)
+{
+	return -ENODEV;
+}
+static inline int qpnp_get_reset_en(int pon_type)
+{
+	return -ENODEV;
+}
+#endif /* CONFIG_KPDPWR_S2_DVDD_RESET */
+
 static inline int qpnp_pon_set_restart_reason(enum pon_restart_reason reason)
 {
 	return -ENODEV;
@@ -84,6 +111,10 @@ static inline int qpnp_pon_set_restart_reason(enum pon_restart_reason reason)
 static inline bool qpnp_pon_check_hard_reset_stored(void)
 {
 	return false;
+}
+static inline int downgrade_hvdcp_9v_to_5v(void)
+{
+	return -ENODEV;
 }
 #endif
 

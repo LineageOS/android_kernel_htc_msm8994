@@ -930,7 +930,6 @@ static int req_crypt_map(struct dm_target *ti, struct request *clone,
 	req_io = mempool_alloc(req_io_pool, gfp_flag);
 	if (!req_io) {
 		DMERR("%s req_io allocation failed\n", __func__);
-		BUG();
 		error = DM_REQ_CRYPT_ERROR;
 		goto submit_request;
 	}

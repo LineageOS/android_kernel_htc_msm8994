@@ -55,6 +55,11 @@ obj-$(CONFIG_USB_SPEEDTOUCH)	+= atm/
 obj-$(CONFIG_USB_MUSB_HDRC)	+= musb/
 obj-$(CONFIG_USB_CHIPIDEA)	+= chipidea/
 obj-$(CONFIG_USB_RENESAS_USBHS)	+= renesas_usbhs/
+# HTC SSD USB +
+ifneq ($(findstring ACADIA,$(PRIVATE_RCMS_NAME)),)
+obj-$(CONFIG_FUSB_30X)		+= fusb302/
+endif
+# HTC SSD USB -
 obj-$(CONFIG_USB_GADGET)	+= gadget/
 
 obj-$(CONFIG_USB_COMMON)	+= usb-common.o

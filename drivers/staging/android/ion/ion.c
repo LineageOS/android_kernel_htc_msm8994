@@ -77,6 +77,7 @@ struct ion_device {
  * @name:		used for debugging
  * @display_name:	used for debugging (unique version of @name)
  * @display_serial:	used for debugging (to make display_name unique)
+ * @debug_name:		used for debugging, protected by lock
  * @task:		used for debugging
  *
  * A client represents a list of buffers this client may access.
@@ -92,6 +93,7 @@ struct ion_client {
 	char *name;
 	char *display_name;
 	int display_serial;
+	const char *debug_name;
 	struct task_struct *task;
 	pid_t pid;
 	struct dentry *debug_root;
@@ -778,7 +780,7 @@ static int ion_debug_client_show(struct seq_file *s, void *unused)
 		struct ion_handle *handle = rb_entry(n, struct ion_handle,
 						     node);
 
-		seq_printf(s, "%16.16s: %16zx : %16d : %12p",
+		seq_printf(s, "%16.16s: %16zx : %16d : %12pK",
 				handle->buffer->heap->name,
 				handle->buffer->size,
 				atomic_read(&handle->ref.refcount),
@@ -909,6 +911,30 @@ err_put_task_struct:
 }
 EXPORT_SYMBOL(ion_client_create);
 
+int ion_client_set_debug_name(struct ion_client *client, const char *debug_name)
+{
+	int ret = 0;
+	if (!debug_name) {
+		pr_err("%s: debug name cannot be null\n", __func__);
+		return -EINVAL;
+	}
+
+	mutex_lock(&client->lock);
+	if (client->debug_name) {
+		kfree(client->debug_name);
+	}
+
+	client->debug_name = kstrndup(debug_name, 64, GFP_KERNEL);
+	if (!client->debug_name) {
+		pr_err("%s: nomem to kstrdup '%s'\n", __func__, debug_name);
+		ret = -ENOMEM;
+	}
+
+	mutex_unlock(&client->lock);
+	return ret;
+}
+EXPORT_SYMBOL(ion_client_set_debug_name);
+
 void ion_client_destroy(struct ion_client *client)
 {
 	struct ion_device *dev = client->dev;
@@ -932,6 +958,8 @@ void ion_client_destroy(struct ion_client *client)
 	up_write(&dev->lock);
 
 	kfree(client->display_name);
+	if (client->debug_name)
+		kfree(client->debug_name);
 	kfree(client->name);
 	kfree(client);
 }
@@ -1136,7 +1164,7 @@ static void ion_vm_open(struct vm_area_struct *vma)
 	mutex_lock(&buffer->lock);
 	list_add(&vma_list->list, &buffer->vmas);
 	mutex_unlock(&buffer->lock);
-	pr_debug("%s: adding %p\n", __func__, vma);
+	pr_debug("%s: adding %pK\n", __func__, vma);
 }
 
 static void ion_vm_close(struct vm_area_struct *vma)
@@ -1151,7 +1179,7 @@ static void ion_vm_close(struct vm_area_struct *vma)
 			continue;
 		list_del(&vma_list->list);
 		kfree(vma_list);
-		pr_debug("%s: deleting %p\n", __func__, vma);
+		pr_debug("%s: deleting %pK\n", __func__, vma);
 		break;
 	}
 	mutex_unlock(&buffer->lock);
@@ -1592,13 +1620,15 @@ void ion_debug_mem_map_create(struct seq_file *s, struct ion_heap *heap,
 			if (handle->buffer->heap == heap) {
 				struct mem_map_data *data =
 					kzalloc(sizeof(*data), GFP_KERNEL);
+				const char *name = client->debug_name ?
+							client->debug_name : client->name;
 				if (!data)
 					goto inner_error;
 				heap->ops->phys(heap, handle->buffer,
 							&(data->addr), &size);
 				data->size = (unsigned long) size;
 				data->addr_end = data->addr + data->size - 1;
-				data->client_name = kstrdup(client->name,
+				data->client_name = kstrdup(name,
 							GFP_KERNEL);
 				if (!data->client_name) {
 					kfree(data);
@@ -1680,6 +1710,15 @@ static int ion_debug_heap_show(struct seq_file *s, void *unused)
 
 		if (!size)
 			continue;
+		mutex_lock(&client->lock);
+		if (client->debug_name) {
+			seq_printf(s, "%16.s %16u %16zu\n", client->debug_name,
+				   client->pid, size);
+			mutex_unlock(&client->lock);
+			continue;
+		}
+		mutex_unlock(&client->lock);
+
 		if (client->task) {
 			char task_comm[TASK_COMM_LEN];
 

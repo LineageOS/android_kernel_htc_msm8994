@@ -21,6 +21,7 @@
 #include "vidc_hfi_api.h"
 #include "msm_vidc_debug.h"
 #include "msm_vidc_dcvs.h"
+#include "venus_hfi.h"
 
 #define IS_ALREADY_IN_STATE(__p, __d) ({\
 	int __rc = (__p >= __d);\
@@ -146,9 +147,8 @@ int msm_comm_get_inst_load(struct msm_vidc_inst *inst,
 		if (!inst->prop.fps) {
 			dprintk(VIDC_INFO, "%s: instance:%pK prop->fps is set 0\n", __func__, inst);
 			load = 0;
-		} else {
+		} else
 			load = msm_comm_get_mbs_per_sec(inst) / inst->prop.fps;
-		}
 	}
 	return load;
 }
@@ -557,7 +557,7 @@ static int wait_for_sess_signal_receipt(struct msm_vidc_inst *inst,
 		&inst->completions[SESSION_MSG_INDEX(cmd)],
 		msecs_to_jiffies(msm_vidc_hw_rsp_timeout));
 	if (!rc) {
-		dprintk(VIDC_ERR, "Wait interrupted or timedout: %d\n", rc);
+		dprintk(VIDC_ERR, "Wait interrupted or timedout: %d, cmd: %d\n", rc, cmd);
 		msm_comm_kill_session(inst);
 		rc = -EIO;
 	} else {
@@ -1715,7 +1715,7 @@ int msm_comm_scale_clocks_load(struct msm_vidc_core *core, int num_mbs_per_sec)
 	struct msm_vidc_platform_resources *res;
 
 	if (!core) {
-		dprintk(VIDC_ERR, "%s Invalid args: %pK\n", __func__, core);
+		dprintk(VIDC_ERR, "%s Invalid args: %pK \n", __func__, core);
 		return -EINVAL;
 	}
 
@@ -2087,9 +2087,20 @@ fail_vote_bus:
 static int msm_comm_init_core(struct msm_vidc_inst *inst)
 {
 	int rc = 0;
+        struct hfi_device *hdev;
+        struct venus_hfi_device *vhdev;
 
 	if (!inst || !inst->core)
 		return -EINVAL;
+
+        /* HTC_START: ION debug mechanism enhancement
+         * Pass the venus ION client to venus_hfi_device to recognize the ION
+         * buffers which are allocated on venus side is belong to same video instance
+         */
+        hdev = inst->core->device;
+        vhdev = hdev->hfi_device_data;
+        vhdev->inst = inst;
+        /* HTC_END */
 
 	rc = msm_comm_load_fw(inst->core);
 	if (rc) {
@@ -2659,6 +2670,7 @@ static bool reuse_internal_buffers(struct msm_vidc_inst *inst,
 	struct internal_buf *buf;
 	int rc = 0;
 	bool reused = false;
+	struct smem_client *mem_client  = inst->mem_client;
 
 	if (!inst || !buf_list) {
 		dprintk(VIDC_ERR, "%s: invalid params\n", __func__);
@@ -2685,9 +2697,10 @@ static bool reuse_internal_buffers(struct msm_vidc_inst *inst,
 
 		if (buffer_type != HAL_BUFFER_INTERNAL_PERSIST
 			&& buffer_type != HAL_BUFFER_INTERNAL_PERSIST_1) {
-
+			mem_client->clnt = mem_client->clnt_alloc;
 			rc = set_internal_buf_on_fw(inst, buffer_type,
 					buf->handle, true);
+			mem_client->clnt = mem_client->clnt_import;
 			if (rc) {
 				dprintk(VIDC_ERR,
 					"%s: session_set_buffers failed\n",
@@ -2711,6 +2724,7 @@ static int allocate_and_set_internal_bufs(struct msm_vidc_inst *inst,
 	u32 smem_flags = 0;
 	int rc = 0;
 	int i = 0;
+        struct smem_client *mem_client  = inst->mem_client;
 
 	if (!inst || !internal_bufreq || !buf_list)
 		return -EINVAL;
@@ -2722,6 +2736,7 @@ static int allocate_and_set_internal_bufs(struct msm_vidc_inst *inst,
 		smem_flags |= SMEM_SECURE;
 
 	for (i = 0; i < internal_bufreq->buffer_count_actual; i++) {
+                mem_client->clnt = mem_client->clnt_alloc;
 		handle = msm_comm_smem_alloc(inst, internal_bufreq->buffer_size,
 				1, smem_flags, internal_bufreq->buffer_type, 0);
 		if (!handle) {
@@ -2746,6 +2761,7 @@ static int allocate_and_set_internal_bufs(struct msm_vidc_inst *inst,
 		if (rc)
 			goto fail_set_buffers;
 
+                mem_client->clnt = mem_client->clnt_import;
 		mutex_lock(&buf_list->lock);
 		list_add_tail(&binfo->list, &buf_list->list);
 		mutex_unlock(&buf_list->lock);
@@ -2757,6 +2773,9 @@ fail_set_buffers:
 fail_kzalloc:
 	msm_comm_smem_free(inst, handle);
 err_no_mem:
+	/* HTC_START: In memory allocation failed case, need to change the ION client to original one (clnt_import). */
+	mem_client->clnt = mem_client->clnt_import;
+	/* HTC_END */
 	return rc;
 
 }

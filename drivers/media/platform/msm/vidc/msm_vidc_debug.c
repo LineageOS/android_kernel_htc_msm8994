@@ -16,7 +16,7 @@
 #include "vidc_hfi_api.h"
 
 #define MAX_DBG_BUF_SIZE 4096
-int msm_vidc_debug = VIDC_ERR | VIDC_WARN;
+int msm_vidc_debug = VIDC_ERR;
 int msm_vidc_debug_out = VIDC_OUT_PRINTK;
 int msm_fw_debug = 0x18;
 int msm_fw_debug_mode = 0x1;
@@ -306,6 +306,7 @@ static ssize_t inst_info_read(struct file *file, char __user *buf,
 	write_str(&dbg_buf, "fps: %d\n", inst->prop.fps);
 	write_str(&dbg_buf, "state: %d\n", inst->state);
 	write_str(&dbg_buf, "secure: %d\n", !!(inst->flags & VIDC_SECURE));
+	write_str(&dbg_buf, "Calling Process id: %d, name: %s\n", inst->call_pid, inst->process_name);
 	write_str(&dbg_buf, "-----------Formats-------------\n");
 	for (i = 0; i < MAX_PORT_NUM; i++) {
 		write_str(&dbg_buf, "capability: %s\n", i == OUTPUT_PORT ?

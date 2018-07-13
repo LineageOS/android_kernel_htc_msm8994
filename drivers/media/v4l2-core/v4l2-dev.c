@@ -645,6 +645,9 @@ static void determine_valid_ioctls(struct video_device *vdev)
 		SET_VALID_IOCTL(ops, VIDIOC_TRY_DECODER_CMD, vidioc_try_decoder_cmd);
 		SET_VALID_IOCTL(ops, VIDIOC_ENUM_FRAMESIZES, vidioc_enum_framesizes);
 		SET_VALID_IOCTL(ops, VIDIOC_ENUM_FRAMEINTERVALS, vidioc_enum_frameintervals);
+             /* HTC_START: Set Valid IOCTL */
+             SET_VALID_IOCTL(ops, VIDIOC_HTC_SET_CALLPIDNAME, vidioc_htc_set_callingpid_name);
+             /* HTC_END */
 	} else if (is_vbi) {
 		/* vbi specific ioctls */
 		if ((is_rx && (ops->vidioc_g_fmt_vbi_cap ||
@@ -877,6 +880,7 @@ int __video_register_device(struct video_device *vdev, int type, int nr,
 	/* Should not happen since we thought this minor was free */
 	WARN_ON(video_device[vdev->minor] != NULL);
 	vdev->index = get_index(vdev);
+    video_device[vdev->minor] = vdev;
 	mutex_unlock(&videodev_lock);
 
 	if (vdev->ioctl_ops)
@@ -904,6 +908,9 @@ int __video_register_device(struct video_device *vdev, int type, int nr,
 	if (vdev->parent)
 		vdev->dev.parent = vdev->parent;
 	dev_set_name(&vdev->dev, "%s%d", name_base, vdev->num);
+	//HTC_START
+	printk(KERN_ERR "%s: name_base=%s, vdev->minor=%d, vdev->num=%d, vdev->name=%s\n", __func__, name_base, vdev->minor, vdev->num, vdev->name);
+	//HTC_END
 	ret = device_register(&vdev->dev);
 	if (ret < 0) {
 		printk(KERN_ERR "%s: device_register failed\n", __func__);
@@ -939,9 +946,9 @@ int __video_register_device(struct video_device *vdev, int type, int nr,
 #endif
 	/* Part 6: Activate this minor. The char device can now be used. */
 	set_bit(V4L2_FL_REGISTERED, &vdev->flags);
-	mutex_lock(&videodev_lock);
-	video_device[vdev->minor] = vdev;
-	mutex_unlock(&videodev_lock);
+	//HTC_START
+	printk(KERN_ERR "%s: vdev minor %d register success\n", __func__, vdev->minor);
+	//HTC_END
 
 	return 0;
 
@@ -949,6 +956,7 @@ cleanup:
 	mutex_lock(&videodev_lock);
 	if (vdev->cdev)
 		cdev_del(vdev->cdev);
+    video_device[vdev->minor] = NULL;
 	devnode_clear(vdev);
 	mutex_unlock(&videodev_lock);
 	/* Mark this video device as never having been registered. */

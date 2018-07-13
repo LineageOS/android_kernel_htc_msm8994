@@ -220,7 +220,7 @@ static inline int vfat_is_used_badchars(const wchar_t *s, int len)
 			return -EINVAL;
 
 	if (s[i - 1] == ' ') /* last character cannot be space */
-		return -EINVAL;
+		return -FAT_CHARSET_ERROR;
 
 	return 0;
 }
@@ -610,8 +610,14 @@ static int vfat_build_slots(struct inode *dir, const unsigned char *name,
 		goto out_free;
 
 	err = vfat_is_used_badchars(uname, ulen);
-	if (err)
-		goto out_free;
+	if (err) {
+		if (err == -FAT_CHARSET_ERROR) {
+			if (uname[ulen - 2] == ' ')
+				goto out_free;
+			pr_info("%s MTP mkdir \"%s\" workaround\n", __func__, name);
+		} else
+			goto out_free;
+	}
 
 	err = vfat_create_shortname(dir, sbi->nls_disk, uname, ulen,
 				    msdos_name, &lcase);
@@ -1073,15 +1079,25 @@ static struct file_system_type vfat_fs_type = {
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
 };
+
+static struct file_system_type vfat_sd_fs_type = {
+        .owner          = THIS_MODULE,
+        .name           = "vfat_sd",
+        .mount          = vfat_mount,
+        .kill_sb        = kill_block_super,
+        .fs_flags       = FS_REQUIRES_DEV,
+};
 MODULE_ALIAS_FS("vfat");
 
 static int __init init_vfat_fs(void)
 {
+	register_filesystem(&vfat_sd_fs_type);
 	return register_filesystem(&vfat_fs_type);
 }
 
 static void __exit exit_vfat_fs(void)
 {
+	unregister_filesystem(&vfat_sd_fs_type);
 	unregister_filesystem(&vfat_fs_type);
 }
 

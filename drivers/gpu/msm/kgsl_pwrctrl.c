@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1862,6 +1862,8 @@ static int _wake(struct kgsl_device *device)
 		if (status) {
 			kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
 			KGSL_DRV_ERR(device, "start failed %d\n", status);
+			/* Find out the wake-up reason besides PM runtime */
+			dump_stack();
 			break;
 		}
 		/* fall through */
@@ -2083,16 +2085,22 @@ int _suspend(struct kgsl_device *device)
 	device->ftbl->drain(device);
 	/* wait for active count so device can be put in slumber */
 	ret = kgsl_active_count_wait(device, 0);
-	if (ret)
+	if (ret) {
+		KGSL_DRV_ERR(device, "Failed to get kgsl active count.\n");
 		goto err;
+	}
 
 	ret = device->ftbl->idle(device);
-	if (ret)
+	if (ret) {
+		KGSL_DRV_ERR(device, "Failed to set device idle.\n");
 		goto err;
+	}
 
 	ret = _slumber(device);
-	if (ret)
+	if (ret) {
+		KGSL_DRV_ERR(device, "Failed to put device in slumber mode.\n");
 		goto err;
+	}
 
 	kgsl_pwrctrl_set_state(device, KGSL_STATE_SUSPEND);
 	return ret;

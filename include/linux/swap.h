@@ -112,6 +112,7 @@ typedef struct {
  */
 struct reclaim_state {
 	unsigned long reclaimed_slab;
+	int trigger_lmk;
 };
 
 #ifdef __KERNEL__
@@ -152,7 +153,6 @@ enum {
 	SWP_CONTINUED	= (1 << 5),	/* swap_map has count continuation */
 	SWP_BLKDEV	= (1 << 6),	/* its a block device */
 	SWP_FILE	= (1 << 7),	/* set after swap_activate success */
-					/* add others here before... */
 	SWP_SCANNING	= (1 << 8),	/* refcount in scan_swap_map */
 	SWP_FAST	= (1 << 9),	/* blkdev access is fast and cheap */
 };

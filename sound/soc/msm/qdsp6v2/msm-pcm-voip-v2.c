@@ -32,6 +32,13 @@
 #include "q6voice.h"
 #include "audio_ocmem.h"
 
+//htc audio ++
+#undef pr_info
+#undef pr_err
+#define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
+
 #define SHARED_MEM_BUF 2
 #define VOIP_MAX_Q_LEN 10
 #define VOIP_MAX_VOC_PKT_SIZE 4096
@@ -325,7 +332,7 @@ static void voip_ssr_cb_fn(uint32_t opcode, void *private_data)
 	/* Notify ASoC to send next playback/Capture to unblock write/read */
 	struct voip_drv_info *prtd = private_data;
 
-	if (opcode == 0xFFFFFFFF) {
+	if ((opcode == 0xFFFFFFFF) || (opcode == RESET_EVENTS)) { //HTC_AUD
 
 		prtd->voip_reset = true;
 		pr_debug("%s: Notify ASoC to send next playback/Capture\n",
@@ -670,7 +677,7 @@ static void voip_process_dl_pkt(uint8_t *voc_pkt, void *private_data)
 	} else {
 		*((uint32_t *)voc_pkt) = 0;
 		spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
-		pr_err("DL data not available\n");
+		pr_debug("DL data not available\n");
 	}
 	wake_up(&prtd->in_wait);
 }
@@ -1187,7 +1194,8 @@ static int msm_pcm_prepare(struct snd_pcm_substream *substream)
 		ret = msm_pcm_capture_prepare(substream);
 
 	if (prtd->playback_instance && prtd->capture_instance
-	    && (prtd->state != VOIP_STARTED)) {
+	    && (prtd->state != VOIP_STARTED)
+	    && (prtd->play_samp_rate == prtd->cap_samp_rate)) { //HTC_AUD - ensure rx/tx sample rate are the same before config vocoder
 		ret = voip_config_vocoder(substream);
 		if (ret < 0) {
 			pr_err("%s(): fail at configuring vocoder for voip, ret=%d\n",

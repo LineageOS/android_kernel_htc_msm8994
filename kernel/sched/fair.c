@@ -1484,6 +1484,22 @@ int sched_get_cpu_mostly_idle_nr_run(int cpu)
 	return rq->mostly_idle_nr_run;
 }
 
+int sched_set_cpu_budget(int cpu, int budget)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	rq->budget = budget;
+
+	return 0;
+}
+
+int sched_get_cpu_budget(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	return rq->budget;
+}
+
 #ifdef CONFIG_CGROUP_SCHED
 
 static inline int upmigrate_discouraged(struct task_struct *p)
@@ -1624,12 +1640,9 @@ int sched_set_boost(int enable)
 	old_refcount = boost_refcount;
 
 	if (enable == 1) {
-		boost_refcount++;
+		boost_refcount = 1;
 	} else if (!enable) {
-		if (boost_refcount >= 1)
-			boost_refcount--;
-		else
-			ret = -EINVAL;
+		boost_refcount = 0;
 	} else {
 		ret = -EINVAL;
 	}
@@ -1663,6 +1676,19 @@ int sched_boost_handler(struct ctl_table *table, int write,
 done:
 	mutex_unlock(&boost_mutex);
 	return ret;
+}
+
+int over_schedule_budget(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	if (rq->budget == 0)
+		return 1;
+
+	if (rq->budget == 100)
+		return 0;
+
+	return (rq->load_avg > rq->budget)? 1 : 0;
 }
 
 /*
@@ -1800,11 +1826,13 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
 {
 	int best_busy_cpu = -1, fallback_cpu = -1;
 	int min_cstate_cpu = -1;
+	int min_load_cpu = -1;
 	int min_cstate = INT_MAX;
 	int cpu_cost, min_cost = INT_MAX;
 	int i = task_cpu(p), prev_cpu;
 	int hmp_capable;
 	u64 tload, cpu_load, min_load = ULLONG_MAX;
+	u64 min_load_b = ULLONG_MAX;
 	cpumask_t temp;
 	cpumask_t search_cpu;
 	cpumask_t fb_search_cpu = CPU_MASK_NONE;
@@ -1841,6 +1869,9 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
 
 		cpumask_clear_cpu(i, &search_cpu);
 
+		if (over_schedule_budget(i))
+			continue;
+
 		if (sched_cpu_high_irqload(i))
 			continue;
 
@@ -1866,11 +1897,21 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
 		rq = cpu_rq(i);
 		prev_cpu = (i == task_cpu(p));
 
+		cpu_load = cpu_load_sync(i, sync);
+
+		if (cpu_load < min_load_b ||
+			(prev_cpu && cpu_load == min_load_b)) {
+			min_load_b = min_load;
+			min_load_cpu = i;
+		}
+
+		if (over_schedule_budget(i))
+			continue;
+
 		if (sched_cpu_high_irqload(i))
 			continue;
 
 		tload = scale_load_to_cpu(task_load(p), i);
-		cpu_load = cpu_load_sync(i, sync);
 		if (!spill_threshold_crossed(tload, cpu_load, rq)) {
 			if (cpu_load < min_load ||
 			    (prev_cpu && cpu_load == min_load)) {
@@ -1884,6 +1925,10 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
 		return best_busy_cpu;
 
 	for_each_cpu(i, &fb_search_cpu) {
+
+		if (over_schedule_budget(i))
+			continue;
+
 		rq = cpu_rq(i);
 		prev_cpu = (i == task_cpu(p));
 
@@ -1896,13 +1941,14 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
 		}
 	}
 
-	return fallback_cpu;
+	return (fallback_cpu != -1)? fallback_cpu : min_load_cpu;
 }
 
 #define UP_MIGRATION		1
 #define DOWN_MIGRATION		2
 #define EA_MIGRATION		3
 #define IRQLOAD_MIGRATION	4
+#define BUDGET_MIGRATION	5
 
 static int skip_freq_domain(struct rq *task_rq, struct rq *rq, int reason)
 {
@@ -1912,6 +1958,10 @@ static int skip_freq_domain(struct rq *task_rq, struct rq *rq, int reason)
 		return 0;
 
 	switch (reason) {
+	case BUDGET_MIGRATION:
+		skip = 0;
+		break;
+
 	case UP_MIGRATION:
 		skip = rq->capacity <= task_rq->capacity;
 		break;
@@ -2026,6 +2076,8 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
 	int cstate, min_cstate = INT_MAX;
 	int prefer_idle = -1;
 	int prefer_idle_override = 0;
+	int fallback_minload_cpu = -1;
+	u64 min_load_b = ULLONG_MAX;
 	cpumask_t search_cpus;
 	struct rq *trq;
 
@@ -2045,7 +2097,7 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
 		sync = 0;
 	}
 
-	if (small_task && !boost) {
+	if (small_task && !boost && !sync) {
 		best_cpu = best_small_task_cpu(p, sync);
 		prefer_idle = 0;	/* For sched_task_load tracepoint */
 		goto done;
@@ -2053,6 +2105,15 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
 
 	trq = task_rq(p);
 	cpumask_and(&search_cpus, tsk_cpus_allowed(p), cpu_online_mask);
+
+	if (sync) {
+		unsigned int cpuid = smp_processor_id();
+		if (cpumask_test_cpu(cpuid, &search_cpus)) {
+			best_cpu = cpuid;
+			goto done;
+		}
+	}
+
 	for_each_cpu(i, &search_cpus) {
 		struct rq *rq = cpu_rq(i);
 
@@ -2063,6 +2124,12 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
 				     power_cost(scale_load_to_cpu(task_load(p),
 						i), i),
 				     cpu_temp(i));
+
+		if (cpu_rq(i)->budget == 0)
+			continue;
+
+		if (!boost && over_schedule_budget(i))
+			continue;
 
 		if (skip_freq_domain(trq, rq, reason)) {
 			cpumask_andnot(&search_cpus, &search_cpus,
@@ -2075,6 +2142,13 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
 			continue;
 
 		prev_cpu = (i == task_cpu(p));
+
+		cpu_load = cpu_load_sync(i, sync);
+		if (cpu_load < min_load_b ||
+			(prev_cpu && cpu_load == min_load_b)) {
+			min_load_b = cpu_load;
+			fallback_minload_cpu = i;
+		}
 
 		/*
 		 * The least-loaded mostly-idle CPU where the task
@@ -2213,6 +2287,9 @@ done:
 
 	if (cpu_rq(best_cpu)->mostly_idle_freq && !prefer_idle_override)
 		best_cpu = select_packing_target(p, best_cpu);
+
+	if (!boost && over_schedule_budget(best_cpu) && fallback_minload_cpu >= 0)
+		best_cpu = fallback_minload_cpu;
 
 	/*
 	 * prefer_idle is initialized towards middle of function. Leave this
@@ -2642,6 +2719,7 @@ done:
 	return ret;
 }
 
+
 /*
  * Reset balance_interval at all sched_domain levels of given cpu, so that it
  * honors kick.
@@ -2749,6 +2827,9 @@ static inline int migration_needed(struct rq *rq, struct task_struct *p)
 
 	if (!sched_enable_hmp || p->state != TASK_RUNNING)
 		return 0;
+
+	if (over_schedule_budget(cpu_of(rq)))
+		return BUDGET_MIGRATION;
 
 	/* No need to migrate task that is about to be throttled */
 	if (task_will_be_throttled(p))
@@ -5959,6 +6040,7 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 {
 	int tsk_cache_hot = 0;
 	int twf;
+
 	/*
 	 * We do not migrate tasks that are:
 	 * 1) throttled_lb_pair, or
@@ -5966,6 +6048,10 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	 * 3) running (obviously), or
 	 * 4) are cache-hot on their current CPU.
 	 */
+
+	if (over_schedule_budget(env->dst_cpu))
+		return 0;
+
 	if (throttled_lb_pair(task_group(p), env->src_cpu, env->dst_cpu))
 		return 0;
 
@@ -6067,7 +6153,6 @@ static int move_one_task(struct lb_env *env)
 	list_for_each_entry_safe(p, n, &env->src_rq->cfs_tasks, se.group_node) {
 		if (!can_migrate_task(p, env))
 			continue;
-
 		move_task(p, env);
 		/*
 		 * Right now, this is only the second place move_task()
@@ -7473,7 +7558,8 @@ no_move:
 		 * excessive cache_hot migrations and active balances.
 		 */
 		if (idle != CPU_NEWLY_IDLE &&
-		    !(env.flags & LBF_HMP_ACTIVE_BALANCE))
+		    !(env.flags & LBF_HMP_ACTIVE_BALANCE) &&
+		    !over_schedule_budget(env.dst_cpu))
 			sd->nr_balance_failed++;
 
 		if (need_active_balance(&env)) {
@@ -7617,8 +7703,15 @@ void idle_balance(int this_cpu, struct rq *this_rq)
 		balance_cpu = this_cpu;
 	}
 	rcu_read_unlock();
-	balance_rq = cpu_rq(balance_cpu);
 
+	if (over_schedule_budget(balance_cpu)) {
+		if (!over_schedule_budget(this_cpu))
+			balance_cpu = this_cpu;
+		else
+			return;
+	}
+
+	balance_rq = cpu_rq(balance_cpu);
 
 	/*
 	 * Drop the rq->lock, but keep IRQ/preempt disabled.
@@ -8046,6 +8139,9 @@ static void nohz_idle_balance(int this_cpu, enum cpu_idle_type idle)
 		balance_cpu = select_lowest_power_cpu(&cpus_to_balance);
 
 		cpumask_clear_cpu(balance_cpu, &cpus_to_balance);
+		if (over_schedule_budget(balance_cpu))
+			continue;
+
 		if (balance_cpu == this_cpu || !idle_cpu(balance_cpu))
 			continue;
 
@@ -8230,6 +8326,10 @@ static inline int on_null_domain(int cpu)
 void trigger_load_balance(struct rq *rq, int cpu)
 {
 	int type = NOHZ_KICK_ANY;
+
+	if (over_schedule_budget(cpu)) {
+		return;
+	}
 
 	/* Don't need to rebalance while attached to NULL domain */
 	if (time_after_eq(jiffies, rq->next_balance) &&

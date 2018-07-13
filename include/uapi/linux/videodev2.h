@@ -240,6 +240,13 @@ struct v4l2_capability {
 	__u32	reserved[3];
 };
 
+/* HTC_START: Pass calling process id and name in kernel space */
+struct htc_callingpid_data {
+        pid_t call_pid;
+        __u8 process_name[50];
+};
+/* HTC_END */
+
 /* Values for 'capabilities' field */
 #define V4L2_CAP_VIDEO_CAPTURE		0x00000001  /* Is a video capture device */
 #define V4L2_CAP_VIDEO_OUTPUT		0x00000002  /* Is a video output device */
@@ -2021,6 +2028,10 @@ struct v4l2_create_buffers {
 /* Experimental, meant for debugging, testing and internal use.
    Never use these in applications! */
 #define VIDIOC_DBG_G_CHIP_INFO  _IOWR('V', 102, struct v4l2_dbg_chip_info)
+
+/* HTC_START: Pass calling process id and name in kernel space */
+#define VIDIOC_HTC_SET_CALLPIDNAME _IOW('V', 103, struct htc_callingpid_data)
+/* HTC_END */
 
 /* Reminder: when adding new ioctls please add support for them to
    drivers/media/video/v4l2-compat-ioctl32.c as well! */

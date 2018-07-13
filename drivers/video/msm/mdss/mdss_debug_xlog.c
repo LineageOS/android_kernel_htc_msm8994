@@ -28,7 +28,7 @@
 #define XLOG_DEFAULT_ENABLE 0
 #endif
 
-#define XLOG_DEFAULT_PANIC 1
+#define XLOG_DEFAULT_PANIC 0 /* HTC: disable panic */
 #define XLOG_DEFAULT_REGDUMP 0x2 /* dump in RAM */
 #define XLOG_DEFAULT_DBGBUSDUMP 0x3 /* dump in LOG & RAM */
 

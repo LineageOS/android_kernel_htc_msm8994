@@ -86,6 +86,8 @@ static unsigned long lowmem_deathpending_timeout;
 
 static atomic_t shift_adj = ATOMIC_INIT(0);
 static short adj_max_shift = 353;
+module_param_named(adj_max_shift, adj_max_shift, short,
+	S_IRUGO | S_IWUSR);
 
 /* User knob to enable/disable adaptive lmk feature */
 static int enable_adaptive_lmk;
@@ -122,6 +124,10 @@ int adjust_minadj(short *min_score_adj)
 			ret = VMPRESSURE_ADJUST_ENCROACH;
 		else
 			ret = VMPRESSURE_ADJUST_NORMAL;
+
+		lowmem_print(1, "Pressure high, adjust minadj from %d to %d\n",
+			*min_score_adj, adj_max_shift);
+
 		*min_score_adj = adj_max_shift;
 	}
 	atomic_set(&shift_adj, 0);
@@ -237,7 +243,7 @@ void tune_lmk_zone_param(struct zonelist *zonelist, int classzone_idx,
 	for_each_zone_zonelist(zone, zoneref, zonelist, MAX_NR_ZONES) {
 		zone_idx = zonelist_zone_idx(zoneref);
 		if (zone_idx == ZONE_MOVABLE) {
-			if (!use_cma_pages)
+			if (!use_cma_pages && other_free)
 				*other_free -=
 				    zone_page_state(zone, NR_FREE_CMA_PAGES);
 			continue;
@@ -250,9 +256,11 @@ void tune_lmk_zone_param(struct zonelist *zonelist, int classzone_idx,
 			if (other_file != NULL)
 				*other_file -= zone_page_state(zone,
 							       NR_FILE_PAGES)
-					      - zone_page_state(zone, NR_SHMEM);
+					- zone_page_state(zone, NR_SHMEM)
+					- zone_page_state(zone, NR_SWAPCACHE);
 		} else if (zone_idx < classzone_idx) {
-			if (zone_watermark_ok(zone, 0, 0, classzone_idx, 0)) {
+			if (zone_watermark_ok(zone, 0, 0, classzone_idx, 0) &&
+			    other_free) {
 				if (!use_cma_pages) {
 					*other_free -= min(
 					  zone->lowmem_reserve[classzone_idx] +
@@ -265,8 +273,9 @@ void tune_lmk_zone_param(struct zonelist *zonelist, int classzone_idx,
 					  zone->lowmem_reserve[classzone_idx];
 				}
 			} else {
-				*other_free -=
-					   zone_page_state(zone, NR_FREE_PAGES);
+				if (other_free)
+					*other_free -=
+					  zone_page_state(zone, NR_FREE_PAGES);
 			}
 		}
 	}
@@ -367,6 +376,8 @@ void tune_lmk_param(int *other_free, int *other_file, struct shrink_control *sc)
 	}
 }
 
+#define REVERT_ADJ(x)  (x * (-OOM_DISABLE + 1) / OOM_SCORE_ADJ_MAX)
+
 static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 {
 	struct task_struct *tsk;
@@ -391,10 +402,11 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 
 	other_free = global_page_state(NR_FREE_PAGES);
 
-	if (global_page_state(NR_SHMEM) + total_swapcache_pages() <
+	if (global_page_state(NR_SHMEM) + global_page_state(NR_MLOCK) + total_swapcache_pages() <
 		global_page_state(NR_FILE_PAGES))
 		other_file = global_page_state(NR_FILE_PAGES) -
 						global_page_state(NR_SHMEM) -
+						global_page_state(NR_MLOCK) -
 						total_swapcache_pages();
 	else
 		other_file = 0;
@@ -480,6 +492,30 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 			    tasksize <= selected_tasksize)
 				continue;
 		}
+
+#ifdef CONFIG_LMK_ZYGOTE_PROTECT
+		//zygote protection
+		if (!strncmp("main",p->comm,4) && p->parent->pid == 1 ) {
+			if (oom_score_adj != OOM_SCORE_ADJ_MIN) {
+				lowmem_print(2, "select but ignore '%s' (%d), oom_score_adj %d, oom_adj %d, size %d, to kill with invalid adj values\n" \
+								"cache %ldkB is below limit %ldkB",
+					p->comm, p->pid, oom_score_adj, REVERT_ADJ(oom_score_adj), tasksize,
+					other_file * (long)(PAGE_SIZE / 1024),
+					minfree * (long)(PAGE_SIZE / 1024));
+
+				//reset oom_score_adj to OOM_SCORE_ADJ_MIN
+				task_lock(p);
+				p->signal->oom_score_adj = OOM_SCORE_ADJ_MIN;
+				task_unlock(p);
+
+				lowmem_print(2, "reset the '%s' (%d) adj values: oom_score_adj %d, oom_adj %d\n",
+						p->comm, p->pid, OOM_SCORE_ADJ_MIN, REVERT_ADJ(OOM_SCORE_ADJ_MIN));
+
+				continue;
+			}
+		}
+#endif
+
 		selected = p;
 		selected_tasksize = tasksize;
 		selected_oom_score_adj = oom_score_adj;
@@ -487,6 +523,7 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 			     p->comm, p->pid, oom_score_adj, tasksize);
 	}
 	if (selected) {
+		bool should_dump_meminfo = false;
 		long cache_size = other_file * (long)(PAGE_SIZE / 1024);
 		long cache_limit = minfree * (long)(PAGE_SIZE / 1024);
 		long free = other_free * (long)(PAGE_SIZE / 1024);
@@ -502,6 +539,7 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 				"   Slab Reclaimable is %ldkB\n" \
 				"   Slab UnReclaimable is %ldkB\n" \
 				"   Total Slab is %ldkB\n" \
+				"   Order is %d\n"
 				"   GFP mask is 0x%x\n",
 			     selected->comm, selected->pid,
 			     selected_oom_score_adj,
@@ -525,7 +563,14 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 				(long)(PAGE_SIZE / 1024) +
 			     global_page_state(NR_SLAB_UNRECLAIMABLE) *
 				(long)(PAGE_SIZE / 1024),
+				 sc->order,
 			     sc->gfp_mask);
+
+		if (selected->signal->oom_score_adj < 411)
+			should_dump_meminfo = true;
+
+		if (!current_is_kswapd() && current->reclaim_state)
+			current->reclaim_state->trigger_lmk++;
 
 		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
 			show_mem(SHOW_MEM_FILTER_NODES);
@@ -538,6 +583,18 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
 		rem -= selected_tasksize;
 		rcu_read_unlock();
+
+		if (should_dump_meminfo)
+			lowmem_print(1, "killing process of adj less than 7 \n" \
+			            "   NR_FILE_PAGES = %ld \n" \
+						"   NR_SHMEM = %ld \n" \
+						"   NR_MLOCK = %ld \n" \
+						"   total_swapcache_pages = %ld \n",
+						global_page_state(NR_FILE_PAGES),
+						global_page_state(NR_SHMEM),
+						global_page_state(NR_MLOCK),
+						total_swapcache_pages());
+
 		/* give the system time to free up the memory */
 		msleep_interruptible(20);
 		trace_almk_shrink(selected_tasksize, ret,

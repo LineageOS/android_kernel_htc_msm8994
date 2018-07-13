@@ -105,6 +105,10 @@ struct request {
 
 	int cpu;
 
+	ktime_t		enter_time;	/* when this req has been established */
+	ktime_t		process_time;	/* when this req has been sent to device */
+	pid_t pid;	/* from which pid? */
+
 	/* the following two fields are internal, NEVER access directly */
 	unsigned int __data_len;	/* total data len */
 	sector_t __sector;		/* sector cursor */
@@ -1104,7 +1108,7 @@ extern int blk_verify_command(unsigned char *cmd, fmode_t has_write_perm);
 enum blk_default_limits {
 	BLK_MAX_SEGMENTS	= 128,
 	BLK_SAFE_MAX_SECTORS	= 255,
-	BLK_DEF_MAX_SECTORS	= 1024,
+	BLK_DEF_MAX_SECTORS	= 4096,
 	BLK_MAX_SEGMENT_SIZE	= 65536,
 	BLK_SEG_BOUNDARY_MASK	= 0xFFFFFFFFUL,
 };

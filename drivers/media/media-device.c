@@ -51,6 +51,13 @@ static int media_device_get_info(struct media_device *dev,
 
 	memset(&info, 0, sizeof(info));
 
+	//HTC_SATRT, add error handle
+	if (!dev || !dev->dev || !dev->dev->driver) {
+		pr_err("%s: failed\n", __func__);
+		return -EFAULT;
+	}
+	//HTC_END
+
 	strlcpy(info.driver, dev->dev->driver->name, sizeof(info.driver));
 	strlcpy(info.model, dev->model, sizeof(info.model));
 	strlcpy(info.serial, dev->serial, sizeof(info.serial));
@@ -140,7 +147,7 @@ static long __media_device_enum_links(struct media_device *mdev,
 		unsigned int p;
 
 		for (p = 0; p < entity->num_pads; p++) {
-			struct media_pad_desc pad;
+			struct media_pad_desc pad = {0};
 
 			memset(&pad, 0, sizeof(pad));
 			media_device_kpad_to_upad(&entity->pads[p], &pad);

@@ -2126,8 +2126,12 @@ static int dmx_ts_feed_set(struct dmx_ts_feed *ts_feed, u16 pid, int ts_type,
 	struct dvb_demux_feed *feed = (struct dvb_demux_feed *)ts_feed;
 	struct dvb_demux *demux = feed->demux;
 
-	if (pid > DMX_MAX_PID)
+	if (pid > DMX_MAX_PID) {
+		//HTC_START
+		pr_err("%s: invalid PID %u > %u\n", __func__, pid, DMX_MAX_PID);
+		//HTC_END
 		return -EINVAL;
+	}
 
 	if (mutex_lock_interruptible(&demux->mutex))
 		return -ERESTARTSYS;
@@ -2135,12 +2139,18 @@ static int dmx_ts_feed_set(struct dmx_ts_feed *ts_feed, u16 pid, int ts_type,
 	if (ts_type & TS_DECODER) {
 		if (pes_type >= DMX_PES_OTHER) {
 			mutex_unlock(&demux->mutex);
+			//HTC_START
+			pr_err("%s: invalid pes type %d\n", __func__, pes_type);
+			//HTC_END
 			return -EINVAL;
 		}
 
 		if (demux->pesfilter[pes_type] &&
 		    demux->pesfilter[pes_type] != feed) {
 			mutex_unlock(&demux->mutex);
+			//HTC_START
+			pr_err("%s: invalid pes filter\n", __func__);
+			//HTC_END
 			return -EINVAL;
 		}
 
@@ -2185,6 +2195,9 @@ static int dmx_ts_feed_start_filtering(struct dmx_ts_feed *ts_feed)
 
 	if (feed->state != DMX_STATE_READY || feed->type != DMX_TYPE_TS) {
 		mutex_unlock(&demux->mutex);
+		//HTC_START
+		pr_err("%s: invalid state %d or type %d\n", __func__, feed->state, feed->type);
+		//HTC_END
 		return -EINVAL;
 	}
 
@@ -2334,6 +2347,9 @@ static int dmx_ts_feed_data_ready_cb(struct dmx_ts_feed *feed,
 
 	if (dvbdmxfeed->state == DMX_STATE_GO) {
 		mutex_unlock(&dvbdmx->mutex);
+		//HTC_START
+		pr_err("%s: invalid state %d\n", __func__, dvbdmxfeed->state);
+		//HTC_END
 		return -EINVAL;
 	}
 

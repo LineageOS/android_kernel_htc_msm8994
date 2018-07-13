@@ -100,6 +100,11 @@ enum wcd9xxx_mbhc_plug_type {
 	PLUG_TYPE_HIGH_HPH,
 	PLUG_TYPE_GND_MIC_SWAP,
 	PLUG_TYPE_ANC_HEADPHONE,
+//HTC_AUD_START
+	PLUG_TYPE_AS_HEADSET,
+	PLUG_TYPE_35MM_HEADSET,
+	PLUG_TYPE_25MM_HEADSET,
+//HTC_AUD_END
 };
 
 enum wcd9xxx_mbhc_micbias_type {
@@ -166,6 +171,22 @@ enum mbhc_hph_type {
 	MBHC_HPH_MONO,
 	MBHC_HPH_STEREO,
 };
+
+//HTC_AUD_START
+enum htc_id_type {
+	TYPEC_ID1,
+	TYPEC_ID2,
+	TYPEC_POSITION,
+	TYPEC_ID_MAX,
+};
+
+enum htc_switch_type {
+	HEADSET_S3,
+	HEADSET_S4,
+	HEADSET_S5,
+	HEADSET_SWITCH_MAX,
+};
+//HTC_AUD_END
 
 struct wcd9xxx_mbhc_general_cfg {
 	u8 t_ldoh;
@@ -244,6 +265,22 @@ struct wcd9xxx_mbhc_imped_detect_cfg {
 	u16 _beta[3];
 } __packed;
 
+//HTC_AUD_START
+struct htc_headset_config {
+	unsigned int id_gpio[TYPEC_ID_MAX];
+	unsigned int switch_gpio[HEADSET_SWITCH_MAX];
+	unsigned int ext_micbias;
+	unsigned int adc_channel;
+	int (*get_adc_value) (int *, unsigned int);
+	unsigned int adc_35mm_min;
+	unsigned int adc_35mm_max;
+	unsigned int adc_25mm_min;
+	unsigned int adc_25mm_max;
+	bool htc_headset_init;
+	bool IsXaMotherboard;
+};
+//HTC_AUD_END
+
 struct wcd9xxx_mbhc_config {
 	bool read_fw_bin;
 	/*
@@ -276,6 +313,9 @@ struct wcd9xxx_mbhc_config {
 	bool enable_anc_mic_detect;
 	enum hw_jack_type hw_jack_type;
 	int key_code[8];
+//HTC_AUD_START
+	struct htc_headset_config htc_headset_cfg;
+//HTC_AUD_END
 };
 
 struct wcd9xxx_cfilt_mode {

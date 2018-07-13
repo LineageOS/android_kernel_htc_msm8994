@@ -108,7 +108,7 @@ static void ccm_calculate_auth_mac(struct aead_request *req, u8 mac[])
 	struct crypto_aead *aead = crypto_aead_reqtfm(req);
 	struct crypto_aes_ctx *ctx = crypto_aead_ctx(aead);
 	struct __packed { __be16 l; __be32 h; u16 len; } ltag;
-	struct scatter_walk walk;
+	struct scatter_walk walk={};
 	u32 len = req->assoclen;
 	u32 macp = 0;
 
@@ -150,7 +150,7 @@ static int ccm_encrypt(struct aead_request *req)
 	struct crypto_aead *aead = crypto_aead_reqtfm(req);
 	struct crypto_aes_ctx *ctx = crypto_aead_ctx(aead);
 	struct blkcipher_desc desc = { .info = req->iv };
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	u8 __aligned(8) mac[AES_BLOCK_SIZE];
 	u8 buf[AES_BLOCK_SIZE];
 	u32 len = req->cryptlen;
@@ -206,7 +206,7 @@ static int ccm_decrypt(struct aead_request *req)
 	struct crypto_aes_ctx *ctx = crypto_aead_ctx(aead);
 	unsigned int authsize = crypto_aead_authsize(aead);
 	struct blkcipher_desc desc = { .info = req->iv };
-	struct blkcipher_walk walk;
+	struct blkcipher_walk walk={};
 	u8 __aligned(8) mac[AES_BLOCK_SIZE];
 	u8 buf[AES_BLOCK_SIZE];
 	u32 len = req->cryptlen - authsize;

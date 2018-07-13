@@ -1652,12 +1652,13 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	struct sock *sk;
 	uid_t sock_uid;
 	bool res;
+	bool set_sk_callback_lock = false;
+
 	/*
 	 * TODO: unhack how to force just accounting.
 	 * For now we only do tag stats when the uid-owner is not requested
 	 */
 	bool do_tag_stat = !(info->match & XT_QTAGUID_UID);
-	bool set_sk_callback_lock = false;
 
 	if (unlikely(module_passive))
 		return (info->match ^ info->invert) == 0;
@@ -1926,9 +1927,20 @@ static int qtaguid_ctrl_proc_show(struct seq_file *m, void *v)
 			 uid,
 			 sock_tag_entry->pid
 			);
+#ifdef CONFIG_HTC_NETWORK_MODIFY
+		if(likely(sock_tag_entry->socket->file)) {
+			f_count = atomic_long_read(
+			&sock_tag_entry->socket->file->f_count);
+		}else{
+			pr_warn("qtaguid:%s: socket->file is null, read from sk->sk_socket.\n", __func__);
+			f_count = atomic_long_read(
+				&sock_tag_entry->sk->sk_socket->file->f_count);
+		}
+#else
 		f_count = atomic_long_read(
 			&sock_tag_entry->socket->file->f_count);
-		seq_printf(m, "sock=%pK tag=0x%llx (uid=%u) pid=%u "
+#endif
+		seq_printf(m, "sock=%p tag=0x%llx (uid=%u) pid=%u "
 			   "f_count=%lu\n",
 			   sock_tag_entry->sk,
 			   sock_tag_entry->tag, uid,
@@ -2271,7 +2283,20 @@ static int ctrl_cmd_tag(const char *input)
 		 * There is still the ref from this call's sockfd_lookup() so
 		 * it can be done within the spinlock.
 		 */
+
+		/* ++Radio-NW@20140822: fix kernel panic while socket->file is NULL++ */
+#ifdef CONFIG_HTC_NETWORK_MODIFY
+		if(likely(sock_tag_entry->socket->file))
+			sockfd_put(sock_tag_entry->socket);
+		else{
+			pr_warn("qtaguid:%s: socket->file is freed, so put el_socket.\n", __func__);
+			sockfd_put(el_socket);
+		}
+#else
 		sockfd_put(sock_tag_entry->socket);
+#endif
+		/* --Radio-NW@20140822: fix kernel panic while socket->file is NULL-- */
+
 		prev_tag_ref_entry = lookup_tag_ref(sock_tag_entry->tag,
 						    &uid_tag_data_entry);
 		BUG_ON(IS_ERR_OR_NULL(prev_tag_ref_entry));
@@ -2413,7 +2438,20 @@ static int ctrl_cmd_untag(const char *input)
 	 * Release the sock_fd that was grabbed at tag time,
 	 * and once more for the sockfd_lookup() here.
 	 */
+
+	/* ++Radio-NW@20141003: fix kernel panic while socket->file is NULL++ */
+#ifdef CONFIG_HTC_NETWORK_MODIFY
+	if(likely(sock_tag_entry->socket->file))
+		sockfd_put(sock_tag_entry->socket);
+	else{
+		pr_warn("qtaguid:%s: socket->file is freed, so put el_socket.\n", __func__);
+		sockfd_put(el_socket);
+	}
+#else
 	sockfd_put(sock_tag_entry->socket);
+#endif
+	/* --Radio-NW@20141003: fix kernel panic while socket->file is NULL-- */
+
 	CT_DEBUG("qtaguid: ctrl_untag(%s): done. st@%p ...->f_count=%ld\n",
 		 input, sock_tag_entry,
 		 atomic_long_read(&el_socket->file->f_count) - 1);
@@ -2526,7 +2564,7 @@ static int pp_stats_line(struct seq_file *m, struct tag_stat *ts_entry,
 	uid_t stat_uid = get_uid_from_tag(tag);
 	struct proc_print_info *ppi = m->private;
 	/* Detailed tags are not available to everybody */
-	if (!can_read_other_uid_stats(stat_uid)) {
+    if (!can_read_other_uid_stats(stat_uid)) {
 		CT_DEBUG("qtaguid: stats line: "
 			 "%s 0x%llx %u: insufficient priv "
 			 "from pid=%u tgid=%u uid=%u stats.gid=%u\n",

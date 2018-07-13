@@ -551,6 +551,8 @@ void ndisc_send_ns(struct net_device *dev, struct neighbour *neigh,
 	int optlen = 0;
 	struct nd_msg *msg;
 
+	pr_info("[NET]%s() dev - %s\n",
+			__func__, dev->name);
 	if (saddr == NULL) {
 		if (ipv6_get_lladdr(dev, &addr_buf,
 				   (IFA_F_TENTATIVE|IFA_F_OPTIMISTIC)))
@@ -589,6 +591,9 @@ void ndisc_send_rs(struct net_device *dev, const struct in6_addr *saddr,
 	struct rs_msg *msg;
 	int send_sllao = dev->addr_len;
 	int optlen = 0;
+
+    pr_info("[NET]%s() dev - %s\n",
+			__func__, dev->name);
 
 #ifdef CONFIG_IPV6_OPTIMISTIC_DAD
 	/*
@@ -663,6 +668,7 @@ static void ndisc_solicit(struct neighbour *neigh, struct sk_buff *skb)
 				  "%s: trying to ucast probe in NUD_INVALID: %pI6\n",
 				  __func__, target);
 		}
+		pr_info("[NET]%s() ndisc_send_ns\n", __func__);
 		ndisc_send_ns(dev, neigh, target, target, saddr);
 	} else if ((probes -= neigh->parms->app_probes) < 0) {
 #ifdef CONFIG_ARPD
@@ -670,6 +676,7 @@ static void ndisc_solicit(struct neighbour *neigh, struct sk_buff *skb)
 #endif
 	} else {
 		addrconf_addr_solict_mult(target, &mcaddr);
+		pr_info("[NET]%s() ndisc_send_ns\n", __func__);
 		ndisc_send_ns(dev, NULL, target, &mcaddr, saddr);
 	}
 }
@@ -861,7 +868,8 @@ static void ndisc_recv_na(struct sk_buff *skb)
 	struct net_device *dev = skb->dev;
 	struct inet6_ifaddr *ifp;
 	struct neighbour *neigh;
-
+	pr_info("[NET]%s() dev - %s\n",
+			__func__, dev->name);
 	if (skb->len < sizeof(struct nd_msg)) {
 		ND_PRINTK(2, warn, "NA: packet too short\n");
 		return;
@@ -1073,18 +1081,20 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 
 	optlen = (skb->tail - skb->transport_header) - sizeof(struct ra_msg);
 
+	pr_info("[NET]%s() dev - %s\n",
+			__func__, skb->dev->name);
 	if (!(ipv6_addr_type(&ipv6_hdr(skb)->saddr) & IPV6_ADDR_LINKLOCAL)) {
-		ND_PRINTK(2, warn, "RA: source address is not link-local\n");
+		pr_info("[NET]%s() RA: source address is not link-local\n", __func__);
 		return;
 	}
 	if (optlen < 0) {
-		ND_PRINTK(2, warn, "RA: packet too short\n");
+		pr_info("[NET]%s() RA: packet too short\n", __func__);
 		return;
 	}
 
 #ifdef CONFIG_IPV6_NDISC_NODETYPE
 	if (skb->ndisc_nodetype == NDISC_NODETYPE_HOST) {
-		ND_PRINTK(2, warn, "RA: from host or unauthorized router\n");
+		pr_info("[NET]%s() RA: from host or unauthorized router\n", __func__);
 		return;
 	}
 #endif
@@ -1095,13 +1105,13 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 
 	in6_dev = __in6_dev_get(skb->dev);
 	if (in6_dev == NULL) {
-		ND_PRINTK(0, err, "RA: can't find inet6 device for %s\n",
-			  skb->dev->name);
+		pr_info("[NET]%s() RA: can't find inet6 device for %s\n",
+			  __func__, skb->dev->name);
 		return;
 	}
 
 	if (!ndisc_parse_options(opt, optlen, &ndopts)) {
-		ND_PRINTK(2, warn, "RA: invalid ND options\n");
+		pr_info("[NET]%s() RA: invalid ND options\n", __func__);
 		return;
 	}
 
@@ -1154,8 +1164,7 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	if (rt) {
 		neigh = dst_neigh_lookup(&rt->dst, &ipv6_hdr(skb)->saddr);
 		if (!neigh) {
-			ND_PRINTK(0, err,
-				  "RA: %s got default router without neighbour\n",
+			pr_info("[NET]%s() RA: got default router without neighbour\n",
 				  __func__);
 			ip6_rt_put(rt);
 			return;
@@ -1167,20 +1176,17 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	}
 
 	if (rt == NULL && lifetime) {
-		ND_PRINTK(3, dbg, "RA: adding default router\n");
+		pr_info("[NET]%s() RA: adding default router\n", __func__);
 
 		rt = rt6_add_dflt_router(&ipv6_hdr(skb)->saddr, skb->dev, pref);
 		if (rt == NULL) {
-			ND_PRINTK(0, err,
-				  "RA: %s failed to add default route\n",
-				  __func__);
+			pr_info("%s() RA: failed to add default route\n", __func__);
 			return;
 		}
 
 		neigh = dst_neigh_lookup(&rt->dst, &ipv6_hdr(skb)->saddr);
 		if (neigh == NULL) {
-			ND_PRINTK(0, err,
-				  "RA: %s got default router without neighbour\n",
+			pr_info("[NET]%s() RA: got default router without neighbour\n",
 				  __func__);
 			ip6_rt_put(rt);
 			return;
@@ -1256,8 +1262,7 @@ skip_linkparms:
 			lladdr = ndisc_opt_addr_data(ndopts.nd_opts_src_lladdr,
 						     skb->dev);
 			if (!lladdr) {
-				ND_PRINTK(2, warn,
-					  "RA: invalid link-layer address length\n");
+				pr_info("[NET]%s() RA: invalid link-layer address length\n", __func__);
 				goto out;
 			}
 		}
@@ -1321,7 +1326,7 @@ skip_routeinfo:
 		mtu = ntohl(n);
 
 		if (mtu < IPV6_MIN_MTU || mtu > skb->dev->mtu) {
-			ND_PRINTK(2, warn, "RA: invalid mtu: %d\n", mtu);
+			pr_info("[NET]%s() RA: invalid mtu: %d\n", __func__, mtu);
 		} else if (in6_dev->cnf.mtu6 != mtu) {
 			in6_dev->cnf.mtu6 = mtu;
 
@@ -1342,7 +1347,7 @@ skip_routeinfo:
 	}
 
 	if (ndopts.nd_opts_tgt_lladdr || ndopts.nd_opts_rh) {
-		ND_PRINTK(2, warn, "RA: invalid RA options\n");
+		pr_info("[NET]%s() RA: invalid RA options\n", __func__);
 	}
 out:
 	ip6_rt_put(rt);

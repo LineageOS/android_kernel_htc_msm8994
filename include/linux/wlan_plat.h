@@ -26,6 +26,7 @@ struct wifi_platform_data {
 	int (*get_mac_addr)(unsigned char *buf);
 	int (*get_wake_irq)(void);
 	void *(*get_country_code)(char *ccode, u32 flags);
+	int (*get_irq_number)(unsigned long *flags_ptr);
 #ifdef CONFIG_PARTIALRESUME
 #define WIFI_PR_INIT			0
 #define WIFI_PR_NOTIFY_RESUME		1

@@ -1,4 +1,4 @@
-/*  Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/*  Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,6 +26,13 @@
 #include "sound/q6afe-v2.h"
 #include <sound/audio_cal_utils.h>
 #include "q6voice.h"
+
+//htc audio ++
+#undef pr_info
+#undef pr_err
+#define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
 
 #define TIMEOUT_MS 300
 
@@ -312,7 +319,7 @@ static struct voice_data *voice_get_session(u32 session_id)
 		break;
 	}
 
-	pr_debug("%s:session_id 0x%x session handle %p\n",
+	pr_debug("%s:session_id 0x%x session handle %pK\n",
 		__func__, session_id, v);
 
 	return v;
@@ -2049,11 +2056,18 @@ static int voice_send_set_device_cmd(struct voice_data *v)
 	int ret = 0;
 	void *apr_cvp;
 	u16 cvp_handle;
-
+//htc audio ++
+	int voc_idx = 0;
+//htc audio --
 	if (v == NULL) {
 		pr_err("%s: v is NULL\n", __func__);
 		return -EINVAL;
 	}
+
+//htc audio ++
+	voc_idx = voice_get_idx_for_session(v->session_id);
+//htc audio --
+
 	apr_cvp = common.apr_q6_cvp;
 
 	if (!apr_cvp) {
@@ -2083,11 +2097,11 @@ static int voice_send_set_device_cmd(struct voice_data *v)
 	cvp_setdev_cmd.cvp_set_device_v2.tx_port_id = v->dev_tx.port_id;
 	cvp_setdev_cmd.cvp_set_device_v2.rx_port_id = v->dev_rx.port_id;
 
-	if (common.ec_ref_ext) {
+	if (common.ec_ref_ext[voc_idx]) {
 		cvp_setdev_cmd.cvp_set_device_v2.vocproc_mode =
 				VSS_IVOCPROC_VOCPROC_MODE_EC_EXT_MIXING;
 		cvp_setdev_cmd.cvp_set_device_v2.ec_ref_port_id =
-				common.ec_port_id;
+				common.ec_port_id[voc_idx];
 	} else {
 		cvp_setdev_cmd.cvp_set_device_v2.vocproc_mode =
 				    VSS_IVOCPROC_VOCPROC_MODE_EC_INT_MIXING;
@@ -2961,7 +2975,7 @@ static int voice_map_cal_memory(struct cal_block_data *cal_block,
 		cal_block->map_data.map_size,
 		VOC_CAL_MEM_MAP_TOKEN);
 	if (result < 0) {
-		pr_err("%s: Mmap did not work! addr = 0x%pa, size = %zd\n",
+		pr_err("%s: Mmap did not work! addr = 0x%pK, size = %zd\n",
 			__func__,
 			&cal_block->cal_data.paddr,
 			cal_block->map_data.map_size);
@@ -3001,7 +3015,7 @@ static int remap_cal_data(struct cal_block_data *cal_block,
 			goto done;
 		}
 	} else {
-		pr_debug("%s:  Cal block 0x%pa, size %zd already mapped. Q6 map handle = %d\n",
+		pr_debug("%s:  Cal block 0x%pK, size %zd already mapped. Q6 map handle = %d\n",
 			__func__, &cal_block->cal_data.paddr,
 			cal_block->map_data.map_size,
 			cal_block->map_data.q6map_handle);
@@ -3199,7 +3213,7 @@ int voc_map_rtac_block(struct rtac_cal_block_data *cal_block)
 	if (!is_rtac_memory_allocated()) {
 		result = voice_alloc_rtac_mem_map_table();
 		if (result < 0) {
-			pr_err("%s: RTAC alloc mem map table did not work! addr = 0x%pa, size = %d\n",
+			pr_err("%s: RTAC alloc mem map table did not work! addr = 0x%pK, size = %d\n",
 				__func__,
 				&cal_block->cal_data.paddr,
 				cal_block->map_data.map_size);
@@ -3214,7 +3228,7 @@ int voc_map_rtac_block(struct rtac_cal_block_data *cal_block)
 		cal_block->map_data.map_size,
 		VOC_RTAC_MEM_MAP_TOKEN);
 	if (result < 0) {
-		pr_err("%s: RTAC mmap did not work! addr = 0x%pa, size = %d\n",
+		pr_err("%s: RTAC mmap did not work! addr = 0x%pK, size = %d\n",
 			__func__,
 			&cal_block->cal_data.paddr,
 			cal_block->map_data.map_size);
@@ -3279,10 +3293,18 @@ static int voice_setup_vocproc(struct voice_data *v)
 	struct cvp_create_full_ctl_session_cmd cvp_session_cmd;
 	int ret = 0;
 	void *apr_cvp;
+//htc audio ++
+	int voc_idx = 0;
+//htc audio --
 	if (v == NULL) {
 		pr_err("%s: v is NULL\n", __func__);
 		return -EINVAL;
 	}
+
+//htc audio ++
+	voc_idx = voice_get_idx_for_session(v->session_id);
+//htc audio --
+
 	apr_cvp = common.apr_q6_cvp;
 
 	if (!apr_cvp) {
@@ -3314,11 +3336,11 @@ static int voice_setup_vocproc(struct voice_data *v)
 	cvp_session_cmd.cvp_session.rx_port_id = v->dev_rx.port_id;
 	cvp_session_cmd.cvp_session.profile_id =
 					 VSS_ICOMMON_CAL_NETWORK_ID_NONE;
-	if (common.ec_ref_ext) {
+	if (common.ec_ref_ext[voc_idx]) { // htc audio
 		cvp_session_cmd.cvp_session.vocproc_mode =
 				VSS_IVOCPROC_VOCPROC_MODE_EC_EXT_MIXING;
 		cvp_session_cmd.cvp_session.ec_ref_port_id =
-					common.ec_port_id;
+					common.ec_port_id[voc_idx]; // htc audio
 	} else {
 		cvp_session_cmd.cvp_session.vocproc_mode =
 				 VSS_IVOCPROC_VOCPROC_MODE_EC_INT_MIXING;
@@ -4318,7 +4340,7 @@ int voc_start_record(uint32_t port_id, uint32_t set, uint32_t session_id)
 
 			break;
 		}
-		pr_debug("%s: port_id: %d, set: %d, v: %p\n",
+		pr_debug("%s: port_id: %d, set: %d, v: %pK\n",
 			 __func__, port_id, set, v);
 
 		mutex_lock(&v->lock);
@@ -4677,12 +4699,18 @@ static int voc_disable_cvp(uint32_t session_id)
 {
 	struct voice_data *v = voice_get_session(session_id);
 	int ret = 0;
-
+//htc audio ++
+	int voc_idx = 0;
+//htc audio --
 	if (v == NULL) {
 		pr_err("%s: invalid session_id 0x%x\n", __func__, session_id);
 
 		return -EINVAL;
 	}
+
+//htc audio ++
+	voc_idx = voice_get_idx_for_session(v->session_id);
+//htc audio --
 
 	mutex_lock(&v->lock);
 
@@ -4705,8 +4733,8 @@ static int voc_disable_cvp(uint32_t session_id)
 	}
 	mutex_unlock(&v->lock);
 
-	if (common.ec_ref_ext)
-		voc_set_ext_ec_ref(AFE_PORT_INVALID, false);
+	if (common.ec_ref_ext[voc_idx]) // htc audio
+		voc_set_ext_ec_ref(AFE_PORT_INVALID, false, voc_idx); // htc audio
 
 done:
 	return ret;
@@ -5180,12 +5208,18 @@ int voc_end_voice_call(uint32_t session_id)
 {
 	struct voice_data *v = voice_get_session(session_id);
 	int ret = 0;
-
+//htc audio ++
+	int voc_idx = 0;
+//htc audio --
 	if (v == NULL) {
 		pr_err("%s: invalid session_id 0x%x\n", __func__, session_id);
 
 		return -EINVAL;
 	}
+
+//htc audio ++
+	voc_idx = voice_get_idx_for_session(v->session_id);
+//htc audio --
 
 	mutex_lock(&v->lock);
 
@@ -5212,8 +5246,8 @@ int voc_end_voice_call(uint32_t session_id)
 
 		ret = -EINVAL;
 	}
-	if (common.ec_ref_ext)
-		voc_set_ext_ec_ref(AFE_PORT_INVALID, false);
+	if (common.ec_ref_ext[voc_idx]) // htc audio
+		voc_set_ext_ec_ref(AFE_PORT_INVALID, false, voc_idx); // htc audio
 
 	mutex_unlock(&v->lock);
 	return ret;
@@ -5272,11 +5306,19 @@ int voc_disable_device(uint32_t session_id)
 {
 	struct voice_data *v = voice_get_session(session_id);
 	int ret = 0;
+//htc audio ++
+	int voc_idx = 0;
+//htc audio --
 
 	if (v == NULL) {
 		pr_err("%s: v is NULL\n", __func__);
 		return -EINVAL;
 	}
+	pr_debug("%s: voc state=%d\n", __func__, v->voc_state);
+
+//htc audio ++
+	voc_idx = voice_get_idx_for_session(v->session_id);
+//htc audio --
 
 	pr_debug("%s: voc state=%d\n", __func__, v->voc_state);
 	mutex_lock(&v->lock);
@@ -5298,8 +5340,8 @@ int voc_disable_device(uint32_t session_id)
 			 __func__, v->voc_state);
 	}
 
-	if (common.ec_ref_ext)
-		voc_set_ext_ec_ref(AFE_PORT_INVALID, false);
+	if (common.ec_ref_ext[voc_idx]) // htc audio
+		voc_set_ext_ec_ref(AFE_PORT_INVALID, false, voc_idx); // htc audio
 done:
 	mutex_unlock(&v->lock);
 
@@ -5539,10 +5581,15 @@ fail:
 	return ret;
 }
 
-int voc_set_ext_ec_ref(uint16_t port_id, bool state)
+int voc_set_ext_ec_ref(uint16_t port_id, bool state, int voc_idx) // htc audio
 {
 	int ret = 0;
-
+//htc audio ++
+	if(voc_idx < 0 || voc_idx >= MAX_VOC_SESSIONS) {
+		pr_err("voc_idx %d is invalid\n",voc_idx);
+		return ret;
+	}
+//htc audio --
 	mutex_lock(&common.common_lock);
 	if (state == true) {
 		if (port_id == AFE_PORT_INVALID) {
@@ -5550,11 +5597,11 @@ int voc_set_ext_ec_ref(uint16_t port_id, bool state)
 			ret = -EINVAL;
 			goto exit;
 		}
-		common.ec_port_id = port_id;
-		common.ec_ref_ext = true;
+		common.ec_port_id[voc_idx] = port_id;	// htc audio
+		common.ec_ref_ext[voc_idx] = true;	// htc audio
 	} else {
-		common.ec_ref_ext = false;
-		common.ec_port_id = port_id;
+		common.ec_ref_ext[voc_idx] = false;	// htc audio
+		common.ec_port_id[voc_idx] = port_id;	// htc audio
 	}
 exit:
 	mutex_unlock(&common.common_lock);
@@ -6278,12 +6325,12 @@ static int voice_alloc_oob_shared_mem(void)
 		cnt++;
 	}
 
-	pr_debug("%s buf[0].data:[%p], buf[0].phys:[%pa], &buf[0].phys:[%p],\n",
+	pr_debug("%s buf[0].data:[%pK], buf[0].phys:[%pK], &buf[0].phys:[%pK],\n",
 		 __func__,
 		(void *)v->shmem_info.sh_buf.buf[0].data,
 		&v->shmem_info.sh_buf.buf[0].phys,
 		(void *)&v->shmem_info.sh_buf.buf[0].phys);
-	pr_debug("%s: buf[1].data:[%p], buf[1].phys[%pa], &buf[1].phys[%p]\n",
+	pr_debug("%s: buf[1].data:[%pK], buf[1].phys[%pK], &buf[1].phys[%pK]\n",
 		__func__,
 		(void *)v->shmem_info.sh_buf.buf[1].data,
 		&v->shmem_info.sh_buf.buf[1].phys,
@@ -6325,7 +6372,7 @@ static int voice_alloc_oob_mem_table(void)
 	}
 
 	v->shmem_info.memtbl.size = sizeof(struct vss_imemory_table_t);
-	pr_debug("%s data[%p]phys[%pa][%p]\n", __func__,
+	pr_debug("%s data[%pK]phys[%pK][%pK]\n", __func__,
 		 (void *)v->shmem_info.memtbl.data,
 		 &v->shmem_info.memtbl.phys,
 		 (void *)&v->shmem_info.memtbl.phys);
@@ -6677,7 +6724,7 @@ static int voice_alloc_cal_mem_map_table(void)
 	}
 
 	common.cal_mem_map_table.size = sizeof(struct vss_imemory_table_t);
-	pr_debug("%s: data %p phys %pa\n", __func__,
+	pr_debug("%s: data %pK phys %pK\n", __func__,
 		 common.cal_mem_map_table.data,
 		 &common.cal_mem_map_table.phys);
 
@@ -6704,7 +6751,7 @@ static int voice_alloc_rtac_mem_map_table(void)
 	}
 
 	common.rtac_mem_map_table.size = sizeof(struct vss_imemory_table_t);
-	pr_debug("%s: data %p phys %pa\n", __func__,
+	pr_debug("%s: data %pK phys %pK\n", __func__,
 		 common.rtac_mem_map_table.data,
 		 &common.rtac_mem_map_table.phys);
 
@@ -7041,7 +7088,9 @@ static int __init voice_init(void)
 	common.default_vol_step_val = 0;
 	common.default_vol_ramp_duration_ms = DEFAULT_VOLUME_RAMP_DURATION;
 	common.default_mute_ramp_duration_ms = DEFAULT_MUTE_RAMP_DURATION;
-	common.ec_ref_ext = false;
+	//htc audio
+	//common.ec_ref_ext = false;
+
 	/* Initialize MVS info. */
 	common.mvs_info.network_type = VSS_NETWORK_ID_DEFAULT;
 
@@ -7089,6 +7138,9 @@ static int __init voice_init(void)
 		init_waitqueue_head(&common.voice[i].cvp_wait);
 
 		mutex_init(&common.voice[i].lock);
+//htc audio ++
+		common.ec_ref_ext[i] = false;
+//htc audio --
 	}
 
 	if (voice_init_cal_data())

@@ -1699,12 +1699,19 @@ struct damping_params_t {
 	uint32_t hw_params;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum actuator_type {
+	ACTUATOR_VCM,
+	ACTUATOR_PIEZO,
+};
+#else
 enum actuator_type {
 	ACTUATOR_VCM,
 	ACTUATOR_PIEZO,
 	ACTUATOR_HVCM,
 	ACTUATOR_BIVCM,
 };
+#endif
 
 enum msm_actuator_data_type {
 	MSM_ACTUATOR_BYTE_DATA = 1,
@@ -1716,6 +1723,12 @@ enum msm_actuator_addr_type {
 	MSM_ACTUATOR_WORD_ADDR,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum msm_actuator_write_type {
+	MSM_ACTUATOR_WRITE_HW_DAMP,
+	MSM_ACTUATOR_WRITE_DAC,
+};
+#else
 enum msm_actuator_write_type {
 	MSM_ACTUATOR_WRITE_HW_DAMP,
 	MSM_ACTUATOR_WRITE_DAC,
@@ -1724,7 +1737,17 @@ enum msm_actuator_write_type {
 	MSM_ACTUATOR_POLL,
 	MSM_ACTUATOR_READ_WRITE,
 };
+#endif
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_actuator_reg_params_t {
+	enum msm_actuator_write_type reg_write_type;
+	uint32_t hw_mask;
+	uint16_t reg_addr;
+	uint16_t hw_shift;
+	uint16_t data_shift;
+};
+#else
 struct msm_actuator_reg_params_t {
 	enum msm_actuator_write_type reg_write_type;
 	uint32_t hw_mask;
@@ -1735,6 +1758,7 @@ struct msm_actuator_reg_params_t {
 	uint16_t reg_data;
 	uint16_t delay;
 };
+#endif
 
 struct reg_settings_t {
 	uint16_t reg_addr;

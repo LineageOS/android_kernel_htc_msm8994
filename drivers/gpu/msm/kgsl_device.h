@@ -390,6 +390,9 @@ struct kgsl_device {
 	struct workqueue_struct *events_wq;
 
 	struct device *busmondev; /* pseudo dev for GPU BW voting governor */
+
+	/* used to switch htc decision for gpu fault */
+	int gpu_fault_no_panic;
 };
 
 
@@ -591,9 +594,18 @@ struct kgsl_device *kgsl_get_device(int dev_idx);
 static inline void kgsl_process_add_stats(struct kgsl_process_private *priv,
 	unsigned int type, size_t size)
 {
+	if (type >= KGSL_MEM_ENTRY_MAX)
+		return;
+
 	priv->stats[type].cur += size;
 	if (priv->stats[type].max < priv->stats[type].cur)
 		priv->stats[type].max = priv->stats[type].cur;
+}
+
+static inline void kgsl_process_sub_stats(struct kgsl_process_private *priv,
+	unsigned int type, size_t size)
+{
+	priv->stats[type].cur -= size;
 }
 
 static inline void kgsl_regread(struct kgsl_device *device,

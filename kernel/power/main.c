@@ -578,6 +578,81 @@ power_attr(pm_freeze_timeout);
 
 #endif	/* CONFIG_FREEZER*/
 
+int powersave_enabled = 0;
+static ssize_t
+powersave_show(struct kobject *kobj, struct kobj_attribute *attr,
+                char *buf)
+{
+	return sprintf(buf, "%d\n", powersave_enabled);
+}
+
+static ssize_t
+powersave_store(struct kobject *kobj, struct kobj_attribute *attr,
+                const char *buf, size_t n)
+{
+	unsigned long val;
+
+	if (strict_strtoul(buf, 10, &val))
+		return -EINVAL;
+
+	printk(KERN_INFO "Change powersave attr from %d to %ld\n", powersave_enabled, val);
+	powersave_enabled = val;
+	sysfs_notify(kobj, NULL, "powersave");
+	return n;
+}
+power_attr(powersave);
+
+static char ktop_buf[1024];
+static ssize_t
+ktop_accu_show(struct kobject *kobj, struct kobj_attribute *attr,
+                char *buf)
+{
+	return scnprintf(buf, sizeof(ktop_buf), "%s", ktop_buf);
+}
+
+static ssize_t
+ktop_accu_store(struct kobject *kobj, struct kobj_attribute *attr,
+                const char *buf, size_t n)
+{
+	strncpy(ktop_buf, buf, sizeof(ktop_buf) - 1);
+	ktop_buf[sizeof(ktop_buf) - 1] = '\0';
+	return n;
+}
+power_attr(ktop_accu);
+
+#define MAX_BUF 1024
+static char thermal_monitor_buf[MAX_BUF];
+static char *thermal_monitor_change[2] = { "thermal_monitor", NULL };
+
+#define thermal_attr(_name) \
+static struct kobj_attribute _name##_attr = {	\
+	.attr   = {				\
+		.name = __stringify(_name),	\
+		.mode = 0640,			\
+	},					\
+	.show   = _name##_show,			\
+	.store  = _name##_store,		\
+ }
+
+static ssize_t
+thermal_monitor_show(struct kobject *kobj, struct kobj_attribute *attr,
+		     char *buf)
+{
+	return scnprintf(buf, sizeof(thermal_monitor_buf), "%s", thermal_monitor_buf);
+}
+
+static ssize_t
+thermal_monitor_store(struct kobject *kobj, struct kobj_attribute *attr,
+		      const char *buf, size_t n)
+{
+	strncpy(thermal_monitor_buf, buf, sizeof(thermal_monitor_buf) - 1);
+	thermal_monitor_buf[sizeof(thermal_monitor_buf) - 1] = '\0';
+	kobject_uevent_env(kobj, KOBJ_CHANGE, thermal_monitor_change);
+	pr_info("thermal-monitor uevent notify.\n");
+	return n;
+}
+thermal_attr(thermal_monitor);
+
 static struct attribute * g[] = {
 	&state_attr.attr,
 #ifdef CONFIG_PM_TRACE
@@ -604,6 +679,11 @@ static struct attribute * g[] = {
 #ifdef CONFIG_FREEZER
 	&pm_freeze_timeout_attr.attr,
 #endif
+#ifdef CONFIG_HTC_PNPMGR
+	&powersave_attr.attr,
+#endif
+	&thermal_monitor_attr.attr,
+	&ktop_accu_attr.attr,
 	NULL,
 };
 

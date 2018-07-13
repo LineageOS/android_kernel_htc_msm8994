@@ -38,6 +38,13 @@
 #include "msm-pcm-q6-v2.h"
 #include "msm-pcm-routing-v2.h"
 
+//htc audio ++
+#undef pr_info
+#undef pr_err
+#define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
+
 enum stream_state {
 	IDLE = 0,
 	STOPPED,
@@ -765,7 +772,7 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 		pr_debug("%s: pcm stopped in_count 0\n", __func__);
 		return 0;
 	}
-	pr_debug("Checking if valid buffer is available...%p\n",
+	pr_debug("Checking if valid buffer is available...%pK\n",
 						data);
 	data = q6asm_is_cpu_buf_avail(OUT, prtd->audio_client, &size, &idx);
 	bufptr = data;
@@ -922,7 +929,7 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (buf == NULL || buf[0].data == NULL)
 		return -ENOMEM;
 
-	pr_debug("%s:buf = %p\n", __func__, buf);
+	pr_debug("%s:buf = %pK\n", __func__, buf);
 	dma_buf->dev.type = SNDRV_DMA_TYPE_DEV;
 	dma_buf->dev.dev = substream->pcm->card->dev;
 	dma_buf->private_data = NULL;
@@ -1177,7 +1184,7 @@ static int msm_pcm_add_app_type_controls(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 	kctl = app_type_info->kctl;
-	snprintf(kctl->id.name, ctl_len, "%s %d %s", mixer_ctl_name,
+	snprintf(kctl->id.name, sizeof(kctl->id.name), "%s %d %s", mixer_ctl_name, //HTC_AUD_MOD
 		 rtd->pcm->device, suffix);
 	kctl = app_type_info->kctl;
 	kctl->put = msm_pcm_app_type_cfg_ctl_put;

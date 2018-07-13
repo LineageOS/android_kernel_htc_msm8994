@@ -103,12 +103,13 @@ static int uid_stat_show(struct seq_file *m, void *v)
 		/* if this task is exiting, we have already accounted for the
 		 * time and power.
 		 */
-		if (task->cpu_power == ULLONG_MAX)
-			continue;
+		//Hard code workaround for CONGIF_UID_CPUTIME=y
+		//if (task->cpu_power == ULLONG_MAX)
+		//	continue;
 		task_cputime_adjusted(task, &utime, &stime);
 		uid_entry->active_utime += utime;
 		uid_entry->active_stime += stime;
-		uid_entry->active_power += task->cpu_power;
+		uid_entry->active_power += 0;//task->cpu_power;
 	} while_each_thread(temp, task);
 	read_unlock(&tasklist_lock);
 
@@ -218,8 +219,8 @@ static int process_notifier(struct notifier_block *self,
 	task_cputime_adjusted(task, &utime, &stime);
 	uid_entry->utime += utime;
 	uid_entry->stime += stime;
-	uid_entry->power += task->cpu_power;
-	task->cpu_power = ULLONG_MAX;
+	uid_entry->power += 0; //task->cpu_power; Hard code workaround for CONFIG_UID_CPUTIME=y
+	//task->cpu_power = ULLONG_MAX;
 
 exit:
 	mutex_unlock(&uid_lock);

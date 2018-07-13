@@ -1559,13 +1559,13 @@ int ipa_q6_pipe_reset(void)
 	if (!atomic_read(&ipa_ctx->uc_ctx.uc_loaded)) {
 		IPAERR("uC is not loaded, won't reset Q6 pipes\n");
 	} else {
-		for (client_idx = 0; client_idx < IPA_CLIENT_MAX; client_idx++)
-			if (IPA_CLIENT_IS_Q6_CONS(client_idx) ||
-			    IPA_CLIENT_IS_Q6_PROD(client_idx)) {
-				res = ipa_uc_reset_pipe(client_idx);
-				if (res)
-					BUG();
-			}
+	for (client_idx = 0; client_idx < IPA_CLIENT_MAX; client_idx++)
+		if (IPA_CLIENT_IS_Q6_CONS(client_idx) ||
+		    IPA_CLIENT_IS_Q6_PROD(client_idx)) {
+			res = ipa_uc_reset_pipe(client_idx);
+			if (res)
+				BUG();
+		}
 	}
 
 	/* set proxy vote before decrement */

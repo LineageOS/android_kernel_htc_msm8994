@@ -696,6 +696,12 @@ KBUILD_CPPFLAGS += $(KCPPFLAGS)
 KBUILD_AFLAGS += $(KAFLAGS)
 KBUILD_CFLAGS += $(KCFLAGS)
 
+#HTC_START
+ifneq ($(findstring M60,$(PRIVATE_SKU_NAME)),)
+KBUILD_CFLAGS += -DCONFIG_CAMERA_DRIVER_VER_M
+endif
+#HTC_END
+
 # Use --build-id when available.
 LDFLAGS_BUILD_ID = $(patsubst -Wl$(comma)%,%,\
 			      $(call cc-ldoption, -Wl$(comma)--build-id,))

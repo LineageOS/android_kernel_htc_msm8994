@@ -595,6 +595,10 @@ static long msm_private_ioctl(struct file *file, void *fh,
 		ret_cmd = kzalloc(sizeof(*ret_cmd), GFP_KERNEL);
 		if (!ret_cmd) {
 			rc = -ENOMEM;
+			//HTC_START
+			if ( event_data->command == MSM_CAMERA_PRIV_STREAM_OFF )
+				pr_err("HTC: StreamOff IOCTL_CMD_ACK kzalloc fail\n");
+			//HTC_END
 			break;
 		}
 
@@ -605,6 +609,10 @@ static long msm_private_ioctl(struct file *file, void *fh,
 		if (WARN_ON(!cmd_ack)) {
 			kzfree(ret_cmd);
 			rc = -EFAULT;
+			//HTC_START
+			if ( event_data->command == MSM_CAMERA_PRIV_STREAM_OFF )
+				pr_err("HTC: StreamOff IOCTL_CMD_ACK cmd_ack fail\n");
+			//HTC_END
 			break;
 		}
 
@@ -616,6 +624,10 @@ static long msm_private_ioctl(struct file *file, void *fh,
 			sizeof(struct msm_v4l2_event_data));
 		memcpy(&ret_cmd->event, &event, sizeof(struct v4l2_event));
 		msm_enqueue(&cmd_ack->command_q, &ret_cmd->list);
+		//HTC_START
+		if ( event_data->command == MSM_CAMERA_PRIV_STREAM_OFF )
+		    pr_err("HTC: StreamOff IOCTL_CMD_ACK\n");
+		//HTC_END
 		complete(&cmd_ack->wait_complete);
 		spin_unlock_irqrestore(&(session->command_ack_q.lock),
 		   spin_flags);
@@ -734,6 +746,11 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 	/*re-init wait_complete */
 	INIT_COMPLETION(cmd_ack->wait_complete);
 
+	//HTC_START, debug for close camera
+	if(event_data->command == MSM_CAMERA_PRIV_DEL_STREAM)
+	    pr_err("%s : queue MSM_CAMERA_PRIV_DEL_STREAM evt+\n", __func__);
+	//HTC_END
+
 	v4l2_event_queue(vdev, event);
 
 	if (timeout < 0) {
@@ -747,6 +764,10 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 	rc = wait_for_completion_timeout(&cmd_ack->wait_complete,
 			msecs_to_jiffies(timeout));
 
+	//HTC_START, debug for close camera
+	if(event_data->command == MSM_CAMERA_PRIV_DEL_STREAM)
+	    pr_err("%s : queue MSM_CAMERA_PRIV_DEL_STREAM evt-\n", __func__);
+	//HTC_END
 
 	if (list_empty_careful(&cmd_ack->command_q.list)) {
 		if (!rc) {

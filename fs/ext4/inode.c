@@ -46,6 +46,7 @@
 #include "truncate.h"
 
 #include <trace/events/ext4.h>
+#include <trace/events/mmcio.h>
 
 #define MPAGE_DA_EXTENT_TAIL 0x01
 

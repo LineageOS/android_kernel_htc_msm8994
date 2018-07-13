@@ -793,6 +793,7 @@ bool is_cma_pageblock(struct page *page)
 {
 	return get_pageblock_migratetype(page) == MIGRATE_CMA;
 }
+EXPORT_SYMBOL(is_cma_pageblock);
 
 /* Free whole pageblock and set it's migration type to MIGRATE_CMA. */
 void __init init_cma_reserved_pageblock(struct page *page)
@@ -1044,16 +1045,12 @@ static void change_pageblock_range(struct page *pageblock_page,
 
 /* Remove an element from the buddy allocator from the fallback list */
 static inline struct page *
-__rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
+__rmqueue_fallback_order(struct zone *zone, int order, int start_migratetype, int current_order)
 {
 	struct free_area * area;
-	int current_order;
 	struct page *page;
 	int migratetype, i;
 
-	/* Find the largest possible block of pages in the other list */
-	for (current_order = MAX_ORDER-1; current_order >= order;
-						--current_order) {
 		for (i = 0;; i++) {
 			migratetype = fallbacks[start_migratetype][i];
 
@@ -1117,6 +1114,29 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
 
 			return page;
 		}
+
+	return NULL;
+}
+
+/* Remove an element from the buddy allocator from the fallback list */
+static inline struct page *
+__rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
+{
+	int current_order;
+	struct page *page;
+
+	/* Find the largest possible block of pages in the other list */
+	for (current_order = MAX_ORDER-1; current_order >= max(PAGE_ALLOC_COSTLY_ORDER+1, order); --current_order) {
+		page = __rmqueue_fallback_order(zone, order, start_migratetype, current_order);
+		if (page)
+			return page;
+	}
+
+	/* While current_order <= PAGE_ALLOC_COSTLY_ORDER, find the smallest pages in the other list to avoid fragmentation*/
+	for (current_order = order; current_order <= PAGE_ALLOC_COSTLY_ORDER; ++current_order) {
+		page = __rmqueue_fallback_order(zone, order, start_migratetype, current_order);
+		if (page)
+			return page;
 	}
 
 	return NULL;
@@ -5603,6 +5623,22 @@ static void __meminit setup_per_zone_inactive_ratio(void)
 		calculate_zone_inactive_ratio(zone);
 }
 
+int vm_inactive_ratio = 0;
+int vm_inactive_ratio_handler(ctl_table *table, int write,
+	void __user *buffer, size_t *length, loff_t *ppos)
+{
+	struct zone *zone;
+	int old_ratio = vm_inactive_ratio;
+	int ret;
+
+	ret = proc_dointvec_minmax(table, write, buffer, length, ppos);
+	if (ret == 0 && write && vm_inactive_ratio != old_ratio) {
+		for_each_zone(zone){
+			zone->inactive_ratio = vm_inactive_ratio;
+		}
+	}
+	return ret;
+}
 /*
  * Initialise min_free_kbytes.
  *

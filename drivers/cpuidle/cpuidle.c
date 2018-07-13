@@ -121,8 +121,8 @@ int cpuidle_idle_call(void)
 	int next_state, entered_state;
 
 	if (need_resched()) {
-		local_irq_enable();
-		return 0;
+	   local_irq_enable();
+	   return 0;
 	}
 
 	if (off)

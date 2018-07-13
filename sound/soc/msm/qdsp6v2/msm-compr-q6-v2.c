@@ -37,6 +37,10 @@
 #include "msm-pcm-routing-v2.h"
 #include "audio_ocmem.h"
 #include <sound/tlv.h>
+// HTC_AUD ++
+#include <sound/q6adm-v2.h>
+#include <sound/htc_acoustic_alsa.h>
+// HTC_AUD --
 
 #define COMPRE_CAPTURE_NUM_PERIODS	16
 /* Allocate the worst case frame size for compressed audio */
@@ -192,7 +196,7 @@ static void compr_event_handler(uint32_t opcode,
 		pr_debug("%s:writing %d bytes of buffer[%d] to dsp 2\n",
 				__func__, prtd->pcm_count, prtd->out_head);
 		temp = buf[0].phys + (prtd->out_head * prtd->pcm_count);
-		pr_debug("%s:writing buffer[%d] from 0x%pa\n",
+		pr_debug("%s:writing buffer[%d] from 0x%pK\n",
 			__func__, prtd->out_head, &temp);
 
 		if (runtime->tstamp_mode == SNDRV_PCM_TSTAMP_ENABLE)
@@ -243,7 +247,7 @@ static void compr_event_handler(uint32_t opcode,
 		break;
 	case ASM_DATA_EVENT_READ_DONE_V2: {
 		pr_debug("ASM_DATA_EVENT_READ_DONE\n");
-		pr_debug("buf = %p, data = 0x%X, *data = %p,\n"
+		pr_debug("buf = %pK, data = 0x%X, *data = %pK,\n"
 			 "prtd->pcm_irq_pos = %d\n",
 				prtd->audio_client->port[OUT].buf,
 			 *(uint32_t *)prtd->audio_client->port[OUT].buf->data,
@@ -253,7 +257,7 @@ static void compr_event_handler(uint32_t opcode,
 		memcpy(prtd->audio_client->port[OUT].buf->data +
 			   prtd->pcm_irq_pos, (ptrmem + READDONE_IDX_SIZE),
 			   COMPRE_CAPTURE_HEADER_SIZE);
-		pr_debug("buf = %p, updated data = 0x%X, *data = %p\n",
+		pr_debug("buf = %pK, updated data = 0x%X, *data = %pK\n",
 				prtd->audio_client->port[OUT].buf,
 			*(uint32_t *)(prtd->audio_client->port[OUT].buf->data +
 				prtd->pcm_irq_pos),
@@ -269,7 +273,7 @@ static void compr_event_handler(uint32_t opcode,
 		}
 		buf = prtd->audio_client->port[OUT].buf;
 
-		pr_debug("pcm_irq_pos=%d, buf[0].phys = 0x%pa\n",
+		pr_debug("pcm_irq_pos=%d, buf[0].phys = 0x%pK\n",
 				prtd->pcm_irq_pos, &buf[0].phys);
 		read_param.len = prtd->pcm_count - COMPRE_CAPTURE_HEADER_SIZE;
 		read_param.paddr = buf[0].phys +
@@ -295,7 +299,7 @@ static void compr_event_handler(uint32_t opcode,
 			pr_debug("%s: writing %d bytes of buffer[%d] to dsp\n",
 				__func__, prtd->pcm_count, prtd->out_head);
 			buf = prtd->audio_client->port[IN].buf;
-			pr_debug("%s: writing buffer[%d] from 0x%pa head %d count %d\n",
+			pr_debug("%s: writing buffer[%d] from 0x%pK head %d count %d\n",
 				__func__, prtd->out_head, &buf[0].phys,
 				prtd->pcm_count, prtd->out_head);
 			if (runtime->tstamp_mode == SNDRV_PCM_TSTAMP_ENABLE)
@@ -392,6 +396,14 @@ static int msm_compr_playback_prepare(struct snd_pcm_substream *substream)
 	params = &soc_prtd->dpcm[substream->stream].hw_params;
 	if (runtime->format == SNDRV_PCM_FORMAT_S24_LE)
 		bits_per_sample = 24;
+
+	//HTC_AUD_START 
+	if (htc_acoustic_query_feature(HTC_AUD_24BIT) && compr->codec != FORMAT_FLAC) {
+		pr_info("%s: enable 24 bit Audio in POPP\n",
+			__func__);
+		bits_per_sample = 24;
+	}
+	//HTC_AUD_END 
 
 	ret = q6asm_open_write_v2(prtd->audio_client,
 			compr->codec, bits_per_sample);
@@ -602,7 +614,7 @@ static int msm_compr_capture_prepare(struct snd_pcm_substream *substream)
 					- COMPRE_CAPTURE_HEADER_SIZE;
 			read_param.paddr = buf[i].phys
 					+ COMPRE_CAPTURE_HEADER_SIZE;
-			pr_debug("Push buffer [%d] to DSP, paddr: %pa, vaddr: %p\n",
+			pr_debug("Push buffer [%d] to DSP, paddr: %pK, vaddr: %pK\n",
 					i, &read_param.paddr,
 					buf[i].data);
 			q6asm_async_read(prtd->audio_client, &read_param);
@@ -963,7 +975,7 @@ static int msm_compr_hw_params(struct snd_pcm_substream *substream,
 	dma_buf->addr =  buf[0].phys;
 	dma_buf->bytes = runtime->hw.buffer_bytes_max;
 
-	pr_debug("%s: buf[%p]dma_buf->area[%p]dma_buf->addr[%pa]\n"
+	pr_debug("%s: buf[%pK]dma_buf->area[%pK]dma_buf->addr[%pK]\n"
 		 "dma_buf->bytes[%zd]\n", __func__,
 		 (void *)buf, (void *)dma_buf->area,
 		 &dma_buf->addr, dma_buf->bytes);
@@ -1170,6 +1182,103 @@ static int msm_compr_ioctl_shared(struct snd_pcm_substream *substream,
 
 		prtd->cmd_interrupt = 0;
 		return rc;
+//HTC_AUD ++
+	case SNDRV_PCM_IOCTL1_ENABLE_EFFECT:
+	{
+		struct param {
+			uint32_t effect_type; /* 0 for POPP, 1 for COPP */
+			uint32_t module_id;
+			uint32_t param_id;
+			uint32_t payload_size;
+		} q6_param;
+		void *payload;
+
+		pr_info("[%p] %s: SNDRV_PCM_IOCTL1_ENABLE_EFFECT\n", prtd, __func__);
+		if (copy_from_user(&q6_param, (void *) arg,
+					sizeof(q6_param))) {
+			pr_err("[%p] %s: copy param from user failed\n",
+				prtd, __func__);
+			return -EFAULT;
+		}
+
+		if (q6_param.payload_size <= 0 ||
+		    (q6_param.effect_type != 0 &&
+		     q6_param.effect_type != 1)) {
+			pr_err("[%p] %s: unsupported param: %d, 0x%x, 0x%x, %d\n",
+				prtd, __func__, q6_param.effect_type,
+				q6_param.module_id, q6_param.param_id,
+				q6_param.payload_size);
+			return -EINVAL;
+		}
+
+		payload = kzalloc(q6_param.payload_size, GFP_KERNEL);
+		if (!payload) {
+			pr_err("[%p] %s: failed to allocate memory\n",
+				prtd, __func__);
+			return -ENOMEM;
+		}
+
+		if (copy_from_user(payload, (void *) (arg + sizeof(q6_param)),
+			q6_param.payload_size)) {
+			pr_err("[%p] %s: copy payload from user failed\n",
+				prtd, __func__);
+			kfree(payload);
+			return -EFAULT;
+		}
+
+		if (q6_param.effect_type == 0) { /* POPP */
+			if (!prtd->audio_client) {
+				pr_debug("%s: audio_client not found\n",
+					__func__);
+				kfree(payload);
+				return -EACCES;
+			}
+
+			rc = q6asm_enable_effect(prtd->audio_client,
+						q6_param.module_id,
+						q6_param.param_id,
+						q6_param.payload_size,
+						payload);
+			pr_info("[%p] %s: call q6asm_enable_effect, rc %d\n",
+				prtd, __func__, rc);
+		} else { /* COPP */
+			u16 port_id[MSM_BACKEND_DAI_MAX] = {0};
+			int port_num = msm_pcm_routing_get_port(substream,port_id);
+			int i;
+
+			if(port_num > 0) {
+				for(i=0; i<port_num; i++) {
+					if (port_id[i] <= 0) {
+						pr_err("[%p] %s: invalid port_id 0x%x\n",
+							prtd, __func__, port_id[i]);
+					} else {
+#if 0 //not implement yet
+						rc = msm_adm_effect_control(port_id[i],
+								     q6_param.module_id,
+								     q6_param.param_id,
+								     q6_param.payload_size,
+								     payload);
+						pr_info("[%p] %s: call q6adm_enable_effect to port 0x%x, rc %d\n",
+							prtd, __func__, port_id[i],rc);
+#endif
+					}
+				}
+			} else
+				pr_info("%s:no adm port is found\n",__func__);
+		}
+#ifdef Q6_EFFECT_DEBUG
+		{
+			int *ptr;
+			int i;
+			ptr = (int *)payload;
+			for (i = 0; i < (q6_param.payload_size / 4); i++)
+				pr_aud_info("[%p] 0x%08x", prtd, *(ptr + i));
+		}
+#endif
+		kfree(payload);
+		return rc;
+	}
+//HTC_AUD --
 	default:
 		break;
 	}

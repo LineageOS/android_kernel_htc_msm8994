@@ -49,10 +49,20 @@ MODULE_PARM_DESC(overflow_auto_flush,
 static inline int dvb_dmxdev_verify_buffer_size(u32 size, u32 max_size,
 	u32 size_align)
 {
+	//HTC_START
+	bool buffer_ok;
+
 	if (size_align)
-		return size <= max_size && !(size % size_align);
+		buffer_ok = size <= max_size && !(size % size_align);
 	else
-		return size <= max_size;
+		buffer_ok = size <= max_size;
+
+	if (!buffer_ok)
+		pr_err("%s: size=%u, max_size=%u, align=%u\n", __func__, size,
+			max_size, size_align);
+
+	return buffer_ok;
+	//HTC_END
 }
 
 static int dvb_filter_verify_buffer_size(struct dmxdev_filter *filter)
@@ -320,7 +330,10 @@ static int dvb_dmxdev_add_event(struct dmxdev_events_queue *events,
 
 	new_write_index = dvb_dmxdev_advance_event_idx(events->write_index);
 	if (new_write_index == events->read_index) {
-		pr_err("dmxdev: events overflow\n");
+		//pr_err("dmxdev: events overflow\n");
+		//HTC_START
+		pr_err("dmxdev: events overflow, type=%d\n", event->type);
+		//HTC_END
 		return -EOVERFLOW;
 	}
 
@@ -3384,6 +3397,9 @@ static int dvb_dmxdev_start_feed(struct dmxdev *dmxdev,
 
 	ret = tsfeed->start_filtering(tsfeed);
 	if (ret < 0) {
+		//HTC_START
+		pr_err("%s: start_filtering ret=%d\n", __func__, ret);
+		//HTC_END
 		dmxdev->demux->release_ts_feed(dmxdev->demux, tsfeed);
 		return ret;
 	}
@@ -4147,10 +4163,20 @@ static int dvb_demux_do_ioctl(struct file *file,
 			mutex_unlock(&dmxdev->mutex);
 			return -ERESTARTSYS;
 		}
-		if (dmxdevfilter->state < DMXDEV_STATE_SET)
+		if (dmxdevfilter->state < DMXDEV_STATE_SET) {
 			ret = -EINVAL;
-		else
+			//HTC_START
+			pr_err("%s: invalid filter state %d\n", __func__,
+				dmxdevfilter->state);
+			//HTC_END
+		} else {
 			ret = dvb_dmxdev_filter_start(dmxdevfilter);
+			if (ret)
+				//HTC_START
+				pr_err("%s: dvb_dmxdev_filter_start ret=%d\n",
+					__func__, dmxdevfilter->state);
+				//HTC_END
+		}
 		mutex_unlock(&dmxdevfilter->mutex);
 		break;
 

@@ -140,5 +140,4 @@ struct ipa_rmnet_context {
 };
 
 extern struct ipa_rmnet_context ipa_rmnet_ctx;
-#endif /* IPA_QMI_SERVICE_H
- */
+#endif /* IPA_QMI_SERVICE_H */

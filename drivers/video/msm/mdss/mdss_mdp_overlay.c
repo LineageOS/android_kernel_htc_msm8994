@@ -35,6 +35,7 @@
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
 #include "mdss_mdp_rotator.h"
+#include "mdss_htc_util.h"
 
 #define VSYNC_PERIOD 16
 #define BORDERFILL_NDX	0x0BF000BF
@@ -905,6 +906,8 @@ int mdss_mdp_overlay_pipe_setup(struct msm_fb_data_type *mfd,
 		pipe->overfetch_disable = 0;
 	}
 	pipe->bg_color = req->bg_color;
+
+	pipe->color_space = req->color_space;
 
 	if (pipe->type == MDSS_MDP_PIPE_TYPE_CURSOR)
 		goto cursor_done;
@@ -3713,6 +3716,9 @@ static int mdss_mdp_pp_ioctl(struct msm_fb_data_type *mfd,
 		break;
 
 	case mdp_op_pcc_cfg:
+		/* HTC: display calibration for RGB*/
+		htc_update_rgb_cali_data(mfd, &mdp_pp.data.pcc_cfg_data);
+
 		ret = mdss_mdp_pcc_config(&mdp_pp.data.pcc_cfg_data,
 					&copyback);
 		break;

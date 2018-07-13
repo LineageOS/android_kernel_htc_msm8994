@@ -29,15 +29,21 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/slot-gpio.h>
 
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
 #include "core.h"
 #include "host.h"
 
 #define cls_dev_to_mmc_host(d)	container_of(d, struct mmc_host, class_dev)
 
+extern struct workqueue_struct *stats_workqueue;
 static void mmc_host_classdev_release(struct device *dev)
 {
 	struct mmc_host *host = cls_dev_to_mmc_host(dev);
 	mutex_destroy(&host->slot.lock);
+	if (host->mmc_circbuf.buf)
+		kfree(host->mmc_circbuf.buf);
 	kfree(host->wlock_name);
 	kfree(host);
 }
@@ -86,6 +92,7 @@ static int mmc_host_runtime_resume(struct device *dev)
 	if (!mmc_use_core_runtime_pm(host))
 		return 0;
 
+	host->crc_count = 0;
 	ret = mmc_resume_host(host);
 	if (ret < 0) {
 		pr_err("%s: %s: resume host: failed: ret: %d\n",
@@ -603,6 +610,8 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	wake_lock_init(&host->detect_wake_lock, WAKE_LOCK_SUSPEND,
 			host->wlock_name);
 	INIT_DELAYED_WORK(&host->detect, mmc_rescan);
+	INIT_DELAYED_WORK(&host->enable_detect, mmc_enable_detection);
+	INIT_DELAYED_WORK(&host->stats_work, mmc_stats);
 #ifdef CONFIG_PM
 	host->pm_notify.notifier_call = mmc_pm_notify;
 #endif
@@ -833,7 +842,6 @@ static struct attribute_group clk_scaling_attr_grp = {
 	.attrs = clk_scaling_attrs,
 };
 
-#ifdef CONFIG_MMC_PERF_PROFILING
 static ssize_t
 show_perf(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -867,6 +875,8 @@ set_perf(struct device *dev, struct device_attribute *attr,
 	int64_t value;
 
 	sscanf(buf, "%lld", &value);
+	host->debug_mask = value;
+	pr_info("%s: set debug 0x%llx\n", mmc_hostname(host), value);
 	spin_lock(&host->lock);
 	if (!value) {
 		memset(&host->perf, 0, sizeof(host->perf));
@@ -882,16 +892,133 @@ set_perf(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(perf, S_IRUGO | S_IWUSR,
 		show_perf, set_perf);
 
-#endif
+static ssize_t
+show_debug(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+	if (!host)
+		return 0;
+	return sprintf(buf, "%d", host->debug_mask);
+}
+
+static ssize_t
+set_debug(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned int value;
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+
+	sscanf(buf, "%d", &value);
+	host->debug_mask = value;
+	pr_info("%s: set debug level 0x%x\n", mmc_hostname(host), value);
+
+	return count;
+}
+static DEVICE_ATTR(debug, S_IRUGO | S_IWUSR,
+		show_debug, set_debug);
+
 
 static struct attribute *dev_attrs[] = {
-#ifdef CONFIG_MMC_PERF_PROFILING
 	&dev_attr_perf.attr,
-#endif
+	&dev_attr_debug.attr,
 	NULL,
 };
 static struct attribute_group dev_attr_grp = {
 	.attrs = dev_attrs,
+};
+
+static int mmc_proc_acc_perf_read(struct seq_file *m, void *v)
+{
+	struct mmc_host *host = (struct mmc_host*) m->private;
+
+	int head;
+	u64 val;
+	unsigned long rbytes, rtime, wbytes, wtime;
+	unsigned long total_wbytes, total_rbytes, total_wtime, total_rtime;
+	unsigned int rperf = 0, wperf = 0, acc_time;
+	unsigned long flags;
+	char user_buf[128];
+	ssize_t count = 0;
+	int cnt;
+
+	if (!host || (host && !host->circbuf_enable))
+		return 0;
+
+	head = host->mmc_circbuf.head;
+	seq_printf(m, "time interval (min):   ~1  ");
+	for (cnt = 2; cnt < 10; cnt ++)
+		seq_printf(m, "   %d~%d  ", cnt - 1, cnt);
+	seq_printf(m, "   9~10  \n");
+	seq_printf(m, "%s read (KB/s)   :", mmc_hostname(host));
+
+	memset(user_buf, 128, 0);
+	cnt = snprintf(user_buf, sizeof(user_buf), "%s write (KB/s)  :", mmc_hostname(host));
+
+	total_rbytes = total_wbytes = total_wtime = total_rtime = 0;
+	acc_time = 0;
+
+	spin_lock_irqsave(&host->lock, flags);
+	while (head != host->mmc_circbuf.tail) {
+		if (head == 0)
+			head = CIRC_BUFFER_SIZE;
+
+		if (head < sizeof(rbytes) + sizeof(wbytes) + sizeof(rtime) + sizeof(wtime))
+			break;
+
+		head = head - sizeof(wtime);
+		memcpy(&wtime, host->mmc_circbuf.buf + head, sizeof(wtime));
+		head = head - sizeof(wbytes);
+		memcpy(&wbytes, host->mmc_circbuf.buf + head, sizeof(wbytes));
+		head = head - sizeof(rtime);
+		memcpy(&rtime, host->mmc_circbuf.buf + head, sizeof(rtime));
+		head = head - sizeof(rbytes);
+		memcpy(&rbytes, host->mmc_circbuf.buf + head, sizeof(rbytes));
+
+		total_wbytes += wbytes;
+		total_rbytes += rbytes;
+		total_wtime += wtime;
+		total_rtime += rtime;
+		acc_time += MMC_STATS_INTERVAL;
+		if (!(acc_time % (60 * 1000)) || (head == host->mmc_circbuf.tail)) {
+			if (total_wtime) {
+				val = ((u64)total_wbytes / 1024) * 1000000;
+				do_div(val, total_wtime);
+				wperf = (unsigned int)val;
+			}
+
+			if (total_rtime) {
+				val = ((u64)total_rbytes / 1024) * 1000000;
+				do_div(val, total_rtime);
+				rperf = (unsigned int)val;
+			}
+			seq_printf(m, "%6u, ", rperf);
+			cnt += snprintf(&user_buf[cnt], sizeof(user_buf) - cnt, "%6u, ",
+					wperf);
+			total_rbytes = total_wbytes = total_wtime = total_rtime = 0;
+			wperf = rperf = 0;
+		}
+
+		if (acc_time >= 10 * 60 * 1000)
+			break;
+		if ((count + cnt) >= PAGE_SIZE || cnt >= sizeof(user_buf))
+			break;
+	}
+	spin_unlock_irqrestore(&host->lock, flags);
+
+	seq_printf(m, "\n%s\n", user_buf);
+	return 0;
+}
+
+static int mmc_proc_acc_perf_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mmc_proc_acc_perf_read, PDE_DATA(inode));
+}
+
+static const struct file_operations mmc_proc_acc_perf_fops = {
+	.open           = mmc_proc_acc_perf_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = single_release,
 };
 
 /**
@@ -933,6 +1060,22 @@ int mmc_add_host(struct mmc_host *host)
 	host->clk_scaling.polling_delay_ms = 100;
 	host->clk_scaling.scale_down_in_low_wr_load = false;
 
+	host->circbuf_enable = false;
+	host->mmc_circbuf.buf = kzalloc(CIRC_BUFFER_SIZE, GFP_KERNEL);
+	if (!host->mmc_circbuf.buf) {
+		pr_err("%s: failed to allocate memory for circular buffer.\n",
+				mmc_hostname(host));
+	} else {
+		host->mmc_circbuf.head = host->mmc_circbuf.tail = 0;
+		if (mmc_is_mmc_host(host)) {
+			host->mmc_circ_proc = proc_create_data("emmc_acc_perf", 0444, NULL,
+					&mmc_proc_acc_perf_fops, host);
+		} else if (mmc_is_sd_host(host)) {
+			host->mmc_circ_proc = proc_create_data("sd_acc_perf", 0444, NULL,
+					&mmc_proc_acc_perf_fops, host);
+		}
+	}
+
 	err = sysfs_create_group(&host->class_dev.kobj, &clk_scaling_attr_grp);
 	if (err)
 		pr_err("%s: failed to create clk scale sysfs group with err %d\n",
@@ -970,6 +1113,11 @@ void mmc_remove_host(struct mmc_host *host)
 #ifdef CONFIG_DEBUG_FS
 	mmc_remove_host_debugfs(host);
 #endif
+	if (mmc_is_sd_host(host))
+		remove_proc_entry("sd_acc_perf", NULL);
+	else if (mmc_is_mmc_host(host))
+		remove_proc_entry("emmc_acc_perf", NULL);
+
 	sysfs_remove_group(&host->parent->kobj, &dev_attr_grp);
 	sysfs_remove_group(&host->class_dev.kobj, &clk_scaling_attr_grp);
 

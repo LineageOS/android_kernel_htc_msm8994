@@ -1571,6 +1571,7 @@ void msm_isp_process_iommu_page_fault(struct vfe_device *vfe_dev)
 	struct msm_vfe_axi_halt_cmd halt_cmd;
 	uint32_t i;
 
+	memset(&error_event, 0, sizeof(struct msm_isp_event_data));
 	memset(&halt_cmd, 0, sizeof(struct msm_vfe_axi_halt_cmd));
 	halt_cmd.stop_camif = 1;
 	halt_cmd.overflow_detected = 0;

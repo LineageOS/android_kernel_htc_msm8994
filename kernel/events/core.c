@@ -805,77 +805,6 @@ static void put_ctx(struct perf_event_context *ctx)
 	}
 }
 
-/*
- * Because of perf_event::ctx migration in sys_perf_event_open::move_group and
- * perf_pmu_migrate_context() we need some magic.
- *
- * Those places that change perf_event::ctx will hold both
- * perf_event_ctx::mutex of the 'old' and 'new' ctx value.
- *
- * Lock ordering is by mutex address. There is one other site where
- * perf_event_context::mutex nests and that is put_event(). But remember that
- * that is a parent<->child context relation, and migration does not affect
- * children, therefore these two orderings should not interact.
- *
- * The change in perf_event::ctx does not affect children (as claimed above)
- * because the sys_perf_event_open() case will install a new event and break
- * the ctx parent<->child relation, and perf_pmu_migrate_context() is only
- * concerned with cpuctx and that doesn't have children.
- *
- * The places that change perf_event::ctx will issue:
- *
- *   perf_remove_from_context();
- *   synchronize_rcu();
- *   perf_install_in_context();
- *
- * to affect the change. The remove_from_context() + synchronize_rcu() should
- * quiesce the event, after which we can install it in the new location. This
- * means that only external vectors (perf_fops, prctl) can perturb the event
- * while in transit. Therefore all such accessors should also acquire
- * perf_event_context::mutex to serialize against this.
- *
- * However; because event->ctx can change while we're waiting to acquire
- * ctx->mutex we must be careful and use the below perf_event_ctx_lock()
- * function.
- *
- * Lock order:
- *	task_struct::perf_event_mutex
- *	  perf_event_context::mutex
- *	    perf_event_context::lock
- *	    perf_event::child_mutex;
- *	    perf_event::mmap_mutex
- *	    mmap_sem
- */
-static struct perf_event_context *perf_event_ctx_lock(struct perf_event *event)
-{
-	struct perf_event_context *ctx;
-
-again:
-	rcu_read_lock();
-	ctx = ACCESS_ONCE(event->ctx);
-	if (!atomic_inc_not_zero(&ctx->refcount)) {
-		rcu_read_unlock();
-		goto again;
-	}
-	rcu_read_unlock();
-
-	mutex_lock(&ctx->mutex);
-	if (event->ctx != ctx) {
-		mutex_unlock(&ctx->mutex);
-		put_ctx(ctx);
-		goto again;
-	}
-
-	return ctx;
-}
-
-static void perf_event_ctx_unlock(struct perf_event *event,
-				  struct perf_event_context *ctx)
-{
-	mutex_unlock(&ctx->mutex);
-	put_ctx(ctx);
-}
-
 static void unclone_ctx(struct perf_event_context *ctx)
 {
 	if (ctx->parent_ctx) {
@@ -1540,6 +1469,77 @@ retry:
 		perf_group_detach(event);
 	list_del_event(event, ctx);
 	raw_spin_unlock_irq(&ctx->lock);
+}
+
+/*
+ * Because of perf_event::ctx migration in sys_perf_event_open::move_group and
+ * perf_pmu_migrate_context() we need some magic.
+ *
+ * Those places that change perf_event::ctx will hold both
+ * perf_event_ctx::mutex of the 'old' and 'new' ctx value.
+ *
+ * Lock ordering is by mutex address. There is one other site where
+ * perf_event_context::mutex nests and that is put_event(). But remember that
+ * that is a parent<->child context relation, and migration does not affect
+ * children, therefore these two orderings should not interact.
+ *
+ * The change in perf_event::ctx does not affect children (as claimed above)
+ * because the sys_perf_event_open() case will install a new event and break
+ * the ctx parent<->child relation, and perf_pmu_migrate_context() is only
+ * concerned with cpuctx and that doesn't have children.
+ *
+ * The places that change perf_event::ctx will issue:
+ *
+ *   perf_remove_from_context();
+ *   synchronize_rcu();
+ *   perf_install_in_context();
+ *
+ * to affect the change. The remove_from_context() + synchronize_rcu() should
+ * quiesce the event, after which we can install it in the new location. This
+ * means that only external vectors (perf_fops, prctl) can perturb the event
+ * while in transit. Therefore all such accessors should also acquire
+ * perf_event_context::mutex to serialize against this.
+ *
+ * However; because event->ctx can change while we're waiting to acquire
+ * ctx->mutex we must be careful and use the below perf_event_ctx_lock()
+ * function.
+ *
+ * Lock order:
+ *	task_struct::perf_event_mutex
+ *	  perf_event_context::mutex
+ *	    perf_event_context::lock
+ *	    perf_event::child_mutex;
+ *	    perf_event::mmap_mutex
+ *	    mmap_sem
+ */
+static struct perf_event_context *perf_event_ctx_lock(struct perf_event *event)
+{
+	struct perf_event_context *ctx;
+
+again:
+	rcu_read_lock();
+	ctx = ACCESS_ONCE(event->ctx);
+	if (!atomic_inc_not_zero(&ctx->refcount)) {
+		rcu_read_unlock();
+		goto again;
+	}
+	rcu_read_unlock();
+
+	mutex_lock(&ctx->mutex);
+	if (event->ctx != ctx) {
+		mutex_unlock(&ctx->mutex);
+		put_ctx(ctx);
+		goto again;
+	}
+
+	return ctx;
+}
+
+static void perf_event_ctx_unlock(struct perf_event *event,
+				  struct perf_event_context *ctx)
+{
+	mutex_unlock(&ctx->mutex);
+	put_ctx(ctx);
 }
 
 /*
@@ -3337,8 +3337,7 @@ static void perf_remove_from_owner(struct perf_event *event)
 		 * However we can safely take this lock because its the child
 		 * ctx->mutex.
 		 */
-		mutex_lock_nested(&owner->perf_event_mutex,
-					SINGLE_DEPTH_NESTING);
+		mutex_lock_nested(&owner->perf_event_mutex, SINGLE_DEPTH_NESTING);
 
 		/*
 		 * We have to re-check the event->owner field, if it is cleared
@@ -3673,8 +3672,7 @@ static int perf_event_set_output(struct perf_event *event,
 				 struct perf_event *output_event);
 static int perf_event_set_filter(struct perf_event *event, void __user *arg);
 
-static long _perf_ioctl(struct perf_event *event, unsigned int cmd,
-			unsigned long arg)
+static long _perf_ioctl(struct perf_event *event, unsigned int cmd, unsigned long arg)
 {
 	void (*func)(struct perf_event *);
 	u32 flags = arg;
@@ -3731,15 +3729,15 @@ static long _perf_ioctl(struct perf_event *event, unsigned int cmd,
 
 static long perf_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-        struct perf_event *event = file->private_data;
-        struct perf_event_context *ctx;
-        long ret;
+	struct perf_event *event = file->private_data;
+	struct perf_event_context *ctx;
+	long ret;
 
-        ctx = perf_event_ctx_lock(event);
-        ret = _perf_ioctl(event, cmd, arg);
-        perf_event_ctx_unlock(event, ctx);
+	ctx = perf_event_ctx_lock(event);
+	ret = _perf_ioctl(event, cmd, arg);
+	perf_event_ctx_unlock(event, ctx);
 
-        return ret;
+	return ret;
 }
 
 #ifdef CONFIG_COMPAT
@@ -7140,7 +7138,6 @@ SYSCALL_DEFINE5(perf_event_open,
 		 */
 		mutex_lock_double(&gctx->mutex, &ctx->mutex);
 
-		mutex_lock(&gctx->mutex);
 		perf_remove_from_context(group_leader, false);
 
 		/*
@@ -7167,6 +7164,7 @@ SYSCALL_DEFINE5(perf_event_open,
 		 * the old lists, before installing it on new lists.
 		 */
 		synchronize_rcu();
+
 		perf_install_in_context(ctx, group_leader, group_leader->cpu);
 		get_ctx(ctx);
 		list_for_each_entry(sibling, &group_leader->sibling_list,
@@ -7310,7 +7308,6 @@ void perf_pmu_migrate_context(struct pmu *pmu, int src_cpu, int dst_cpu)
 		perf_install_in_context(dst_ctx, event, dst_cpu);
 		get_ctx(dst_ctx);
 	}
-	mutex_unlock(&dst_ctx->mutex);
 	mutex_unlock(&src_ctx->mutex);
 }
 EXPORT_SYMBOL_GPL(perf_pmu_migrate_context);

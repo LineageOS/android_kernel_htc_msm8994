@@ -21,6 +21,46 @@
 #include <linux/usb/composite.h>
 #include <asm/unaligned.h>
 
+/* HTC HACK */
+#define REQUEST_RESET_DELAYED (HZ / 10) /* 100 ms */
+void usb_android_force_reset(struct usb_composite_dev *cdev);
+
+static void composite_request_reset(struct work_struct *w)
+{
+	struct usb_composite_dev *cdev = container_of(
+			(struct delayed_work *)w,
+			struct usb_composite_dev, request_reset);
+	if (cdev)
+		usb_android_force_reset(cdev);
+}
+
+/*++ 2015/01/05 USB Team, PCN00063 ++*/
+static ssize_t print_switch_name(struct switch_dev *sdev, char *buf)
+{
+	return sprintf(buf, "%s\n", sdev->name);
+}
+
+static char *vzw_cdrom_envp_type3[4] = {"SWITCH_NAME=htcctusbcmd",
+			"SWITCH_STATE=UNMOUNTEDCDROM",
+			"CDROM_TYPE=3", 0};
+
+static char *vzw_cdrom_envp_type4[4] = {"SWITCH_NAME=htcctusbcmd",
+			"SWITCH_STATE=UNMOUNTEDCDROM",
+			"CDROM_TYPE=4", 0};
+
+static const char ctusbcmd_switch_name[] = "htcctusbcmd";
+
+static void ctusbcmd_vzw_unmount_work(struct work_struct *w)
+{
+	struct usb_composite_dev *cdev = container_of(w, struct usb_composite_dev, cdusbcmd_vzw_unmount_work.work);
+	printk(KERN_INFO "[USB] %s: UNMOUNTEDCDROM !mask 0x%x\n", __func__, cdev->unmount_cdrom_mask);
+	if (cdev->unmount_cdrom_mask & 1 << 3)
+		kobject_uevent_env(&cdev->compositesdev.dev->kobj, KOBJ_CHANGE, vzw_cdrom_envp_type3);
+	if (cdev->unmount_cdrom_mask & 1 << 4)
+		kobject_uevent_env(&cdev->compositesdev.dev->kobj, KOBJ_CHANGE, vzw_cdrom_envp_type4);
+}
+/*-- 2015/01/05 USB Team, PCN00063 --*/
+
 /*
  * The code in this file is utility code, used to build a gadget driver
  * from one or more "function" drivers, one or more "configuration"
@@ -414,6 +454,12 @@ static u8 encode_bMaxPower(enum usb_device_speed speed,
 	};
 }
 
+/*++ 2015/10/12 USB Team, PCN00086 ++*/
+static struct usb_descriptor_header *fs_mtp_descs[];
+static struct usb_descriptor_header *hs_mtp_descs[];
+static struct usb_descriptor_header *ss_mtp_descs[];
+/*-- 2015/10/12 USB Team, PCN00086 --*/
+
 static int config_buf(struct usb_configuration *config,
 		enum usb_device_speed speed, void *buf, u8 type)
 {
@@ -452,12 +498,24 @@ static int config_buf(struct usb_configuration *config,
 		switch (speed) {
 		case USB_SPEED_SUPER:
 			descriptors = f->ss_descriptors;
+/*++ 2015/10/12 USB Team, PCN00086 ++*/
+			if (!strcmp("mtp", f->name) && os_type == OS_MAC)
+				descriptors = ss_mtp_descs;
+/*-- 2015/10/12 USB Team, PCN00086 --*/
 			break;
 		case USB_SPEED_HIGH:
 			descriptors = f->hs_descriptors;
+/*++ 2015/10/12 USB Team, PCN00086 ++*/
+			if (!strcmp("mtp", f->name) && os_type == OS_MAC)
+				descriptors = hs_mtp_descs;
+/*-- 2015/10/12 USB Team, PCN00086 --*/
 			break;
 		default:
 			descriptors = f->fs_descriptors;
+/*++ 2015/10/12 USB Team, PCN00086 ++*/
+			if (!strcmp("mtp", f->name) && os_type == OS_MAC)
+				descriptors = fs_mtp_descs;
+/*-- 2015/10/12 USB Team, PCN00086 --*/
 		}
 
 		if (!descriptors)
@@ -951,6 +1009,12 @@ void usb_remove_config(struct usb_composite_dev *cdev,
 
 	spin_unlock_irqrestore(&cdev->lock, flags);
 
+/*++ 2014/10/29 USB Team, PCN00025 ++*/
+#ifdef CONFIG_HTC_USB_DEBUG_FLAG
+	printk("[USB]%s unbind+\n",__func__);
+#endif
+/*-- 2014/10/29 USB Team, PCN00025 --*/
+
 	unbind_config(cdev, config);
 }
 
@@ -1293,6 +1357,49 @@ EXPORT_SYMBOL_GPL(usb_string_ids_n);
 
 /*-------------------------------------------------------------------------*/
 
+/*++ 2015/10/12 USB Team, PCN00087 ++*/
+void check_os_type(u8 descriptor_type, u16 w_length)
+{
+	static int mac = 0, win = 0, lin = 0;
+
+	if (os_type == OS_NOT_YET)
+		mac = win = lin = 0;
+
+	switch (descriptor_type) {
+		case USB_DT_DEVICE:
+			if (w_length != 18) {
+				win++;
+				lin++;
+			} else if ((w_length == 18) && (win == 0) && (lin == 0)) {
+				mac++;
+			}
+			break;
+		case USB_DT_CONFIG:
+			if (w_length == 4) {
+				mac++;
+			} else if (w_length == 255) {
+				win++;
+			} else if ((w_length == 9) && (lin >= win)) {
+				lin++;
+			}
+			break;
+		case USB_DT_STRING:
+			if (w_length == 2)
+				mac++;
+			break;
+	}
+
+	if (mac > win && mac > lin)
+		os_type = OS_MAC;
+	else if (win > mac && win > lin)
+		os_type = OS_WINDOWS;
+	else if (lin > mac && lin > win)
+		os_type = OS_LINUX;
+	else
+		os_type = OS_LINUX;
+}
+/*-- 2015/10/12 USB Team, PCN00087 --*/
+
 static void composite_setup_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	if (req->status || req->actual != req->length)
@@ -1345,6 +1452,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		switch (w_value >> 8) {
 
 		case USB_DT_DEVICE:
+			check_os_type(USB_DT_DEVICE, w_length); /*++ 2015/10/12 USB Team, PCN00087 ++*/
 			cdev->desc.bNumConfigurations =
 				count_configs(cdev, USB_DT_DEVICE);
 			cdev->desc.bMaxPacketSize0 =
@@ -1378,6 +1486,16 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				break;
 			/* FALLTHROUGH */
 		case USB_DT_CONFIG:
+/*++ 2015/10/12 USB Team, PCN00087 ++*/
+			check_os_type(USB_DT_CONFIG, w_length);
+			if (os_type == OS_MAC)
+				pr_info("%s: OS_MAC\n", __func__);
+			else if (os_type == OS_WINDOWS)
+				pr_info("%s: OS_WINDOWS\n", __func__);
+			else if (os_type == OS_LINUX)
+				pr_info("%s: OS_LINUX\n", __func__);
+/*-- 2015/10/12 USB Team, PCN00087 --*/
+
 			value = config_desc(cdev, w_value);
 			if (value >= 0)
 				value = min(w_length, (u16) value);
@@ -1394,6 +1512,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 						USB_DT_OTG);
 			break;
 		case USB_DT_STRING:
+			check_os_type(USB_DT_STRING, w_length); /*++ 2015/10/12 USB Team, PCN00087 ++*/
 			value = get_string(cdev, req->buf,
 					w_index, w_value & 0xff);
 			if (value >= 0)
@@ -1628,14 +1747,37 @@ void composite_disconnect(struct usb_gadget *gadget)
 	spin_lock_irqsave(&cdev->lock, flags);
 	if (cdev->config)
 		reset_config(cdev);
+
 	if (cdev->driver->disconnect)
 		cdev->driver->disconnect(cdev);
+
 	if (cdev->delayed_status != 0) {
 		INFO(cdev, "delayed status mismatch..resetting\n");
 		cdev->delayed_status = 0;
 	}
 	spin_unlock_irqrestore(&cdev->lock, flags);
 }
+
+/*++ 2014/11/18 USB Team, PCN00048 ++*/
+void composite_mute_disconnect(struct usb_gadget *gadget)
+{
+	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
+	unsigned long			flags;
+
+	/* REVISIT:  should we have config and device level
+	 * disconnect callbacks?
+	 */
+	spin_lock_irqsave(&cdev->lock, flags);
+	if (cdev->config)
+		reset_config(cdev);
+
+	if (cdev->delayed_status != 0) {
+		INFO(cdev, "delayed status mismatch..resetting\n");
+		cdev->delayed_status = 0;
+	}
+	spin_unlock_irqrestore(&cdev->lock, flags);
+}
+/*-- 2014/11/18 USB Team, PCN00048 --*/
 
 /*-------------------------------------------------------------------------*/
 
@@ -1805,6 +1947,11 @@ static int composite_bind(struct usb_gadget *gadget,
 	if (status)
 		goto fail;
 
+	INIT_DELAYED_WORK(&cdev->request_reset, composite_request_reset);
+/*++ 2015/01/05 USB Team, PCN00063 ++*/
+	INIT_DELAYED_WORK(&cdev->cdusbcmd_vzw_unmount_work, ctusbcmd_vzw_unmount_work);
+/*-- 2015/01/05 USB Team, PCN00063 --*/
+
 	/* composite gadget needs to assign strings for whole device (like
 	 * serial number), register function drivers, potentially update
 	 * power state and consumption, etc
@@ -1818,6 +1965,16 @@ static int composite_bind(struct usb_gadget *gadget,
 	/* has userspace failed to provide a serial number? */
 	if (composite->needs_serial && !cdev->desc.iSerialNumber)
 		WARNING(cdev, "userspace failed to provide iSerialNumber\n");
+
+/*++ 2015/01/05 USB Team, PCN00063 ++*/
+	cdev->compositesdev.name = ctusbcmd_switch_name;
+	cdev->compositesdev.print_name = print_switch_name;
+	status = switch_dev_register(&cdev->compositesdev);
+	if (status) {
+		pr_err("%s: switch_dev_register fail", __func__);
+		goto fail;
+	}
+/*-- 2015/01/05 USB Team, PCN00063 --*/
 
 	INFO(cdev, "%s ready\n", composite->name);
 	return 0;
@@ -1906,6 +2063,10 @@ static const struct usb_gadget_driver composite_driver_template = {
 
 	.setup		= composite_setup,
 	.disconnect	= composite_disconnect,
+
+/*++ 2014/11/18 USB Team, PCN00048 ++*/
+	.mute_disconnect = composite_mute_disconnect,
+/*-- 2014/11/18 USB Team, PCN00048 --*/
 
 	.suspend	= composite_suspend,
 	.resume		= composite_resume,

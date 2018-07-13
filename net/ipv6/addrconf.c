@@ -3239,6 +3239,7 @@ static void addrconf_rs_timer(unsigned long data)
 				   idev->cnf.rtr_solicit_interval);
 		spin_unlock(&ifp->lock);
 
+		pr_info("[NET]%s() ndisc_send_rs\n",__func__);
 		ndisc_send_rs(idev->dev, &ifp->addr, &in6addr_linklocal_allrouters);
 	} else {
 		spin_unlock(&ifp->lock);
@@ -3366,6 +3367,7 @@ static void addrconf_dad_timer(unsigned long data)
 
 	/* send a neighbour solicitation for our addr */
 	addrconf_addr_solict_mult(&ifp->addr, &mcaddr);
+	pr_info("[NET]%s() ndisc_send_ns\n", __func__);
 	ndisc_send_ns(ifp->idev->dev, NULL, &ifp->addr, &mcaddr, &in6addr_any);
 out:
 	in6_ifa_put(ifp);
@@ -3378,7 +3380,7 @@ static void addrconf_dad_completed(struct inet6_ifaddr *ifp)
 	/*
 	 *	Configure the address for reception. Now it is valid.
 	 */
-
+	pr_info("[NET]%s() sending RTM_NEWADDR\n", __func__);
 	ipv6_ifa_notify(RTM_NEWADDR, ifp);
 
 	/* If added prefix is link local and we are prepared to process
@@ -3394,6 +3396,7 @@ static void addrconf_dad_completed(struct inet6_ifaddr *ifp)
 		 *	[...] as part of DAD [...] there is no need
 		 *	to delay again before sending the first RS
 		 */
+		pr_info("[NET]%s() ndisc_send_rs - added link local prefix\n", __func__);
 		ndisc_send_rs(ifp->idev->dev, &ifp->addr, &in6addr_linklocal_allrouters);
 
 		spin_lock_bh(&ifp->lock);
@@ -4433,6 +4436,7 @@ static int inet6_set_iftoken(struct inet6_dev *idev, struct in6_addr *token)
 		/* If we're not ready, then normal ifup will take care
 		 * of this. Otherwise, we need to request our rs here.
 		 */
+		pr_info("[NET]%s() ndisc_send_rs\n", __func__);
 		ndisc_send_rs(dev, &ll_addr, &in6addr_linklocal_allrouters);
 		update_rs = true;
 	}

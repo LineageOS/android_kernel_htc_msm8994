@@ -54,6 +54,8 @@
 #include <linux/usb/composite.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
+#include <linux/usb/htc_info.h>
+#include <linux/power/htc_charger.h>
 
 #include "core.h"
 #include "gadget.h"
@@ -557,10 +559,11 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 			| DWC3_DEPCFG_STREAM_EVENT_EN;
 		dep->stream_capable = true;
 	}
-
-	if (!usb_endpoint_xfer_control(desc))
+/*++ 2014/12/02, USB Team, PCN00052 ++*/
+	if ((usb_endpoint_xfer_isoc(desc))
+	    || ((dep->endpoint.is_ncm) && !usb_endpoint_xfer_control(desc)))
 		params.param1 |= DWC3_DEPCFG_XFER_IN_PROGRESS_EN;
-
+/*-- 2014/12/02, USB Team, PCN00052 --*/
 	/*
 	 * We are doing 1:1 mapping for endpoints, meaning
 	 * Physical Endpoints 2 maps to Logical Endpoint 2 and
@@ -648,7 +651,10 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 		reg |= DWC3_DALEPENA_EP(dep->number);
 		dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
-
+/*++ 2014/12/02, USB Team, PCN00052 ++*/
+		if (dep->endpoint.is_ncm)
+			dwc3_gadget_resize_tx_fifos(dwc);
+/*-- 2014/12/02, USB Team, PCN00052 --*/
 		if (!usb_endpoint_xfer_isoc(desc))
 			return 0;
 
@@ -728,6 +734,34 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 	dbg_event(dep->number, "Clr_TRB", 0);
 	return 0;
 }
+
+/*++ 2014/12/29, USB Team, PCN00062 ++*/
+/**
+ * dwc3_gadget_ep_nuke - Disables a HW endpoint
+ * @dep: the endpoint to disable
+ *
+ * This function also removes requests which are currently processed ny the
+ * hardware and those which are not yet scheduled.
+ * Caller should take care of locking.
+ */
+static void dwc3_gadget_ep_nuke(struct usb_ep *ep)
+{
+	struct dwc3_ep			*dep;
+	struct dwc3			*dwc;
+	unsigned long flags;
+	if (!ep) {
+		pr_debug("dwc3: invalid parameters\n");
+		return;
+	}
+
+	dep = to_dwc3_ep(ep);
+	dwc = dep->dwc;
+	spin_lock_irqsave(&dwc->lock, flags);
+	dwc3_remove_requests(dwc, dep);
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+}
+/*-- 2014/12/29, USB Team, PCN00062 --*/
 
 /* -------------------------------------------------------------------------- */
 
@@ -948,7 +982,10 @@ update_trb:
 
 	if (chain)
 		trb->ctrl |= DWC3_TRB_CTRL_CHN;
-
+/*++ 2014/12/02, USB Team, PCN00052 ++*/
+        if (dep->endpoint.is_ncm)
+            trb->ctrl |= DWC3_TRB_CTRL_CSP;
+/*-- 2014/12/02, USB Team, PCN00052 --*/
 	if (usb_endpoint_xfer_bulk(dep->endpoint.desc) && dep->stream_capable)
 		trb->ctrl |= DWC3_TRB_CTRL_SID_SOFN(req->request.stream_id);
 
@@ -974,9 +1011,14 @@ update_trb:
 
 		goto update_trb;
 	}
-
-	if (!usb_endpoint_xfer_isoc(dep->endpoint.desc) && last)
+/*++ 2014/12/02, USB Team, PCN00052 ++*/
+	if (!usb_endpoint_xfer_isoc(dep->endpoint.desc)) {
+		if (last)
 		trb->ctrl |= DWC3_TRB_CTRL_LST;
+		else if (dep->endpoint.is_ncm && (!req->request.no_interrupt) && (dep->direction != 1))
+			trb->ctrl |= DWC3_TRB_CTRL_IOC;
+	}
+/*-- 2014/12/02, USB Team, PCN00052 --*/
 }
 
 /*
@@ -1466,8 +1508,10 @@ static inline enum dwc3_link_state dwc3_get_link_state(struct dwc3 *dwc)
 
 static bool dwc3_gadget_is_suspended(struct dwc3 *dwc)
 {
+/*++ 2014/12/12, USB Team, PCN00056 ++*/
 	if (atomic_read(&dwc->in_lpm) ||
-		dwc->link_state == DWC3_LINK_STATE_U3)
+		dwc3_get_link_state(dwc) == DWC3_LINK_STATE_U3)
+/*-- 2014/12/12, USB Team, PCN00056 --*/
 		return true;
 	return false;
 }
@@ -1671,6 +1715,9 @@ static const struct usb_ep_ops dwc3_gadget_ep_ops = {
 	.dequeue	= dwc3_gadget_ep_dequeue,
 	.set_halt	= dwc3_gadget_ep_set_halt,
 	.set_wedge	= dwc3_gadget_ep_set_wedge,
+/*++ 2014/12/29, USB Team, PCN00062 ++*/
+	.nuke           = dwc3_gadget_ep_nuke,
+/*-- 2014/12/29, USB Team, PCN00062 --*/
 };
 
 /* -------------------------------------------------------------------------- */
@@ -2069,6 +2116,7 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc);
 static int dwc3_gadget_vbus_session(struct usb_gadget *_gadget, int is_active)
 {
 	struct dwc3 *dwc = gadget_to_dwc(_gadget);
+	struct dwc3_otg		*dotg = dwc->dotg;
 	unsigned long flags;
 
 	if (!dwc->dotg)
@@ -2093,6 +2141,7 @@ static int dwc3_gadget_vbus_session(struct usb_gadget *_gadget, int is_active)
 			 */
 			dwc3_gadget_run_stop(dwc, 1);
 		} else {
+			cancel_delayed_work(&dotg->unknown_charger_notify_work);
 			dwc3_gadget_run_stop(dwc, 0);
 		}
 	}
@@ -2713,6 +2762,9 @@ isoc_workaround:
 		for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
 			dep = dwc->eps[i];
 
+			if (dep->endpoint.desc == NULL)
+				continue;
+
 			if (!(dep->flags & DWC3_EP_ENABLED) ||
 				!usb_endpoint_xfer_isoc(dep->endpoint.desc))
 				continue;
@@ -2764,7 +2816,14 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		dwc3_endpoint_transfer_complete(dwc, dep, event, 1);
 		break;
 	case DWC3_DEPEVT_XFERINPROGRESS:
-		dep->dbg_ep_events.xferinprogress++;
+/*++ 2014/12/02, USB Team, PCN00052 ++*/
+		if (!usb_endpoint_xfer_isoc(dep->endpoint.desc)) {
+			dev_dbg(dwc->dev, "%s is not an Isochronous endpoint\n",
+					dep->name);
+			if (!dep->endpoint.is_ncm)
+				return;
+		}
+/*-- 2014/12/02, USB Team, PCN00052 --*/
 		dwc3_endpoint_transfer_complete(dwc, dep, event, 0);
 		break;
 	case DWC3_DEPEVT_XFERNOTREADY:
@@ -2819,12 +2878,18 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		break;
 	}
 }
-
-static void dwc3_disconnect_gadget(struct dwc3 *dwc)
+/*++ 2014/11/18 USB Team, PCN00048 ++*/
+static void dwc3_disconnect_gadget(struct dwc3 *dwc, int mute)
+/*-- 2014/11/18 USB Team, PCN00048 --*/
 {
 	if (dwc->gadget_driver && dwc->gadget_driver->disconnect) {
 		spin_unlock(&dwc->lock);
-		dwc->gadget_driver->disconnect(&dwc->gadget);
+/*++ 2014/11/18 USB Team, PCN00048 ++*/
+		if (mute)
+			dwc->gadget_driver->mute_disconnect(&dwc->gadget);
+		else
+			dwc->gadget_driver->disconnect(&dwc->gadget);
+/*-- 2014/11/18 USB Team, PCN00048 --*/
 		spin_lock(&dwc->lock);
 	}
 	dwc->gadget.xfer_isr_count = 0;
@@ -2936,7 +3001,9 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
 	dbg_event(0xFF, "DISCONNECT", 0);
-	dwc3_disconnect_gadget(dwc);
+/*++ 2014/11/18 USB Team, PCN00048 ++*/
+	dwc3_disconnect_gadget(dwc, 0);
+/*-- 2014/11/18 USB Team, PCN00048 --*/
 	dwc->start_config_issued = false;
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
@@ -3011,7 +3078,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 		usb_phy_set_power(dotg->otg.phy, 0);
 
 	if (dwc->gadget.speed != USB_SPEED_UNKNOWN)
-		dwc3_disconnect_gadget(dwc);
+/*++ 2014/11/18 USB Team, PCN00048 ++*/
+		dwc3_disconnect_gadget(dwc, 1);
+/*-- 2014/11/18 USB Team, PCN00048 --*/
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	reg &= ~DWC3_DCTL_TSTCTRL_MASK;
@@ -3057,6 +3126,18 @@ static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
 	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 	reg |= DWC3_GCTL_RAMCLKSEL(usb30_clock);
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+}
+
+static const char *speed_to_string(enum usb_device_speed speed_type)
+{
+	switch (speed_type) {
+	case USB_SPEED_SUPER:	return "SUPERSPEED";
+	case USB_SPEED_HIGH:	return "HIGHSPEED";
+	case USB_SPEED_FULL:	return "FULLSPEED";
+	case USB_SPEED_LOW:		return "LOWSPEED";
+	case USB_SPEED_UNKNOWN:
+	default:				return "UNKNOWN SPEED";
+	}
 }
 
 static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
@@ -3113,6 +3194,8 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 		dwc->gadget.speed = USB_SPEED_LOW;
 		break;
 	}
+
+	USB_INFO("%s\n", speed_to_string(dwc->gadget.speed));
 
 	/* Enable USB2 LPM Capability */
 
@@ -3372,17 +3455,28 @@ static void dwc3_dump_reg_info(struct dwc3 *dwc)
 	dbg_print_reg("OSTS", dwc3_readl(dwc->regs, DWC3_OSTS));
 }
 
+extern void usb_set_connect_type(int);
+void htc_dwc3_disable_usb(int disable_usb);
 static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		const struct dwc3_event_devt *event)
 {
+	struct dwc3_otg *dotg = dwc->dotg;
 	switch (event->type) {
 	case DWC3_DEVICE_EVENT_DISCONNECT:
 		dwc3_gadget_disconnect_interrupt(dwc);
 		dwc->dbg_gadget_events.disconnect++;
 		break;
 	case DWC3_DEVICE_EVENT_RESET:
+		USB_INFO("reset\n");
 		dwc3_gadget_reset_interrupt(dwc);
 		dwc->dbg_gadget_events.reset++;
+		usb_set_connect_type(CONNECT_TYPE_USB);
+		cancel_delayed_work(&dotg->unknown_charger_notify_work); /*-- 2015/09/21 USB Team, PCN00084 --*/
+/*++ 2014/11/01 USB Team, PCN00036 ++*/
+		if (dotg->charger && dotg->charger->usb_disable) {
+			dotg->notify_usb_disabled();
+		}
+/*-- 2014/11/01 USB Team, PCN00036 --*/
 		break;
 	case DWC3_DEVICE_EVENT_CONNECT_DONE:
 		dwc3_gadget_conndone_interrupt(dwc);
@@ -3397,6 +3491,17 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		dwc->dbg_gadget_events.link_status_change++;
 		break;
 	case DWC3_DEVICE_EVENT_SUSPEND:
+		USB_INFO("suspend\n");
+/*++ 2015/09/21 USB Team, PCN00084 ++*/
+		cancel_delayed_work(&dotg->unknown_charger_notify_work);
+		/*
+		 * When plug in unknown charger, we need to update USB type to setting UI.
+		 * Batteryservice will read USB/AC/WIRELESS type from setting UI and pop
+		 * unknown charger dialog.
+		 */
+		queue_delayed_work(system_nrt_wq, &dotg->unknown_charger_notify_work, HZ * 10);
+/*-- 2015/09/21 USB Team, PCN00084 --*/
+
 		if (dwc->revision < DWC3_REVISION_230A) {
 			dev_vdbg(dwc->dev, "End of Periodic Frame\n");
 			dwc->dbg_gadget_events.eopf++;
@@ -3526,6 +3631,9 @@ static irqreturn_t dwc3_thread_interrupt(int irq, void *_dwc)
 			union dwc3_event event;
 
 			event.raw = *(u32 *) (evt->buf + evt->lpos);
+#if defined(CONFIG_HTC_DEBUG_RTB)
+			uncached_logk(LOGK_LOGBUF,(void *)((unsigned long int) event.raw));
+#endif
 
 			dwc3_process_event_entry(dwc, &event);
 

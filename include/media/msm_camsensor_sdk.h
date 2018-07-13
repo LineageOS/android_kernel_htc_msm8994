@@ -1,6 +1,10 @@
 #ifndef __LINUX_MSM_CAMSENSOR_SDK_H
 #define __LINUX_MSM_CAMSENSOR_SDK_H
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+#include <linux/v4l2-mediabus.h>
+#endif
+
 #define KVERSION 0x1
 
 #define MAX_POWER_CONFIG      12
@@ -18,7 +22,11 @@
 #define CSI_DECODE_DPCM_10_8_10 5
 #define MAX_CID                 16
 #define I2C_SEQ_REG_DATA_MAX    256
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+#define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
+#else
 #define I2C_REG_DATA_MAX       (8*1024)
+#endif
 
 #define MAX_ACTUATOR_REG_TBL_SIZE 8
 #define MAX_ACTUATOR_REGION       5
@@ -26,7 +34,11 @@
 #define MAX_ACTUATOR_SCENARIO     8
 #define MAX_ACT_MOD_NAME_SIZE     32
 #define MAX_ACT_NAME_SIZE         32
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+#define MAX_ACTUATOR_INIT_SET     12
+#else
 #define MAX_ACTUATOR_INIT_SET     120
+#endif
 #define MAX_I2C_REG_SET           12
 
 #define MAX_NAME_SIZE             32
@@ -40,6 +52,14 @@ enum msm_sensor_camera_id_t {
 	MAX_CAMERAS,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum i2c_freq_mode_t {
+	I2C_STANDARD_MODE,
+	I2C_FAST_MODE,
+	I2C_CUSTOM_MODE,
+	I2C_MAX_MODES,
+};
+#else
 enum i2c_freq_mode_t {
 	I2C_STANDARD_MODE,
 	I2C_FAST_MODE,
@@ -47,10 +67,14 @@ enum i2c_freq_mode_t {
 	I2C_FAST_PLUS_MODE,
 	I2C_MAX_MODES,
 };
+#endif
 
 enum camb_position_t {
 	BACK_CAMERA_B,
 	FRONT_CAMERA_B,
+	 /* HTC_START, */
+	SUB_CAMERA_B,
+	 /* HTC_END */
 	INVALID_CAMERA_B,
 };
 
@@ -134,6 +158,12 @@ enum msm_actuator_addr_type {
 	MSM_ACTUATOR_WORD_ADDR,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum msm_actuator_write_type {
+	MSM_ACTUATOR_WRITE_HW_DAMP,
+	MSM_ACTUATOR_WRITE_DAC,
+};
+#else
 enum msm_actuator_write_type {
 	MSM_ACTUATOR_WRITE_HW_DAMP,
 	MSM_ACTUATOR_WRITE_DAC,
@@ -142,18 +172,27 @@ enum msm_actuator_write_type {
 	MSM_ACTUATOR_POLL,
 	MSM_ACTUATOR_READ_WRITE,
 };
+#endif
 
 enum msm_actuator_i2c_operation {
 	MSM_ACT_WRITE = 0,
 	MSM_ACT_POLL,
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+enum actuator_type {
+	ACTUATOR_VCM,
+	ACTUATOR_PIEZO,
+	ACTUATOR_HVCM,
+};
+#else
 enum actuator_type {
 	ACTUATOR_VCM,
 	ACTUATOR_PIEZO,
 	ACTUATOR_HVCM,
 	ACTUATOR_BIVCM,
 };
+#endif
 
 enum msm_flash_driver_type {
 	FLASH_DRIVER_PMIC,
@@ -196,6 +235,29 @@ struct msm_sensor_init_params {
 	unsigned int            sensor_mount_angle;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_sensor_id_info_t {
+	uint16_t sensor_id_reg_addr;
+	uint16_t sensor_id;
+};
+
+struct msm_camera_sensor_slave_info {
+	char sensor_name[32];
+	char eeprom_name[32];
+	char actuator_name[32];
+	char ois_name[32];
+	char flash_name[32];
+	enum msm_sensor_camera_id_t camera_id;
+	uint16_t slave_addr;
+	enum i2c_freq_mode_t i2c_freq_mode;
+	enum msm_camera_i2c_reg_addr_type addr_type;
+	struct msm_sensor_id_info_t sensor_id_info;
+	struct msm_sensor_power_setting_array power_setting_array;
+	uint8_t  is_init_params_valid;
+	struct msm_sensor_init_params sensor_init_params;
+	uint8_t is_flash_supported;
+};
+#else
 struct msm_sensor_id_info_t {
 	unsigned short sensor_id_reg_addr;
 	unsigned short sensor_id;
@@ -218,6 +280,7 @@ struct msm_camera_sensor_slave_info {
 	struct msm_sensor_init_params sensor_init_params;
 	unsigned char is_flash_supported;
 };
+#endif
 
 struct msm_camera_i2c_reg_array {
 	unsigned short reg_addr;
@@ -275,6 +338,15 @@ struct msm_camera_i2c_seq_reg_setting {
 	unsigned short delay;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_actuator_reg_params_t {
+	enum msm_actuator_write_type reg_write_type;
+	uint32_t hw_mask;
+	uint16_t reg_addr;
+	uint16_t hw_shift;
+	uint16_t data_shift;
+};
+#else
 struct msm_actuator_reg_params_t {
 	enum msm_actuator_write_type reg_write_type;
 	unsigned int hw_mask;
@@ -286,7 +358,7 @@ struct msm_actuator_reg_params_t {
 	unsigned short reg_data;
 	unsigned short delay;
 };
-
+#endif
 
 struct damping_params_t {
 	unsigned int damping_step;
@@ -294,6 +366,15 @@ struct damping_params_t {
 	unsigned int hw_params;
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct region_params_t {
+	/* [0] = ForwardDirection Macro boundary
+	   [1] = ReverseDirection Inf boundary
+	*/
+	uint16_t step_bound[2];
+	uint16_t code_per_step;
+};
+#else
 struct region_params_t {
 	/* [0] = ForwardDirection Macro boundary
 	   [1] = ReverseDirection Inf boundary
@@ -303,6 +384,7 @@ struct region_params_t {
 	/* qvalue for converting float type numbers to integer format */
 	unsigned int qvalue;
 };
+#endif
 
 struct reg_settings_t {
 	unsigned short reg_addr;

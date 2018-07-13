@@ -1102,4 +1102,3 @@ static void __exit bcl_perph_exit(void)
 fs_initcall(bcl_perph_init);
 module_exit(bcl_perph_exit);
 MODULE_ALIAS("platform:" BCL_DRIVER_NAME);
-

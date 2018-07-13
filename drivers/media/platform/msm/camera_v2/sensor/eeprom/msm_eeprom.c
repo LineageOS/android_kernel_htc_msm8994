@@ -1152,6 +1152,15 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 		pr_err("%s:%d kzalloc failed\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
+
+        //HTC_START Check of_node vaild earlier for klockwork issue
+	e_ctrl->is_supported = 0;
+	if (!client->dev.of_node) {
+		pr_err("%s dev.of_node NULL\n", __func__);
+		return -EINVAL;
+	}
+        //HTC_END
+
 	e_ctrl->eeprom_v4l2_subdev_ops = &msm_eeprom_subdev_ops;
 	e_ctrl->eeprom_mutex = &msm_eeprom_mutex;
 	e_ctrl->eboard_info = kzalloc(sizeof(
@@ -1161,11 +1170,13 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 		rc = -ENOMEM;
 		goto ectrl_free;
 	}
+ #if 0   //HTC_START Already check of_node
 	e_ctrl->is_supported = 0;
 	if (!client->dev.of_node) {
 		pr_err("%s dev.of_node NULL\n", __func__);
 		return -EINVAL;
 	}
+#endif    //HTC_END
 
 	rc = of_property_read_u32(client->dev.of_node, "cell-index",
 		&e_ctrl->subdev_id);

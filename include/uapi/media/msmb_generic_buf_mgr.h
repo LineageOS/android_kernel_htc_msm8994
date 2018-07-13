@@ -1,6 +1,17 @@
 #ifndef __UAPI_MEDIA_MSMB_BUF_MNGR_H__
 #define __UAPI_MEDIA_MSMB_BUF_MNGR_H__
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_buf_mngr_info {
+	uint32_t session_id;
+	uint32_t stream_id;
+	uint32_t frame_id;
+	struct timeval timestamp;
+	uint32_t index;
+	uint32_t reserved;
+};
+#else
+
 #include <media/msmb_camera.h>
 
 enum msm_camera_buf_mngr_cmd {
@@ -33,6 +44,7 @@ struct msm_buf_mngr_main_cont_info {
 	uint32_t cnt;
 	int32_t cont_fd;
 };
+#endif
 
 struct v4l2_subdev *msm_buf_mngr_get_subdev(void);
 
@@ -45,6 +57,13 @@ struct v4l2_subdev *msm_buf_mngr_get_subdev(void);
 #define VIDIOC_MSM_BUF_MNGR_BUF_DONE \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 35, struct msm_buf_mngr_info)
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+#define VIDIOC_MSM_BUF_MNGR_INIT \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 36, struct msm_buf_mngr_info)
+
+#define VIDIOC_MSM_BUF_MNGR_DEINIT \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 37, struct msm_buf_mngr_info)
+#else
 #define VIDIOC_MSM_BUF_MNGR_CONT_CMD \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 36, struct msm_buf_mngr_main_cont_info)
 
@@ -53,9 +72,19 @@ struct v4l2_subdev *msm_buf_mngr_get_subdev(void);
 
 #define VIDIOC_MSM_BUF_MNGR_DEINIT \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 38, struct msm_buf_mngr_info)
-
+#endif
 
 #ifdef CONFIG_COMPAT
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_buf_mngr_info32_t {
+	uint32_t session_id;
+	uint32_t stream_id;
+	uint32_t frame_id;
+	struct compat_timeval timestamp;
+	uint32_t index;
+	uint32_t reserved;
+};
+#else
 struct msm_buf_mngr_info32_t {
 	uint32_t session_id;
 	uint32_t stream_id;
@@ -66,6 +95,7 @@ struct msm_buf_mngr_info32_t {
 	enum msm_camera_buf_mngr_buf_type type;
 	struct msm_camera_user_buf_cont_t user_buf;
 };
+#endif
 
 #define VIDIOC_MSM_BUF_MNGR_GET_BUF32 \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 33, struct msm_buf_mngr_info32_t)

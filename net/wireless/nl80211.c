@@ -389,6 +389,24 @@ static const struct nla_policy nl80211_policy[NL80211_ATTR_MAX+1] = {
 	[NL80211_ATTR_MAC_HINT] = { .len = ETH_ALEN },
 	[NL80211_ATTR_WIPHY_FREQ_HINT] = { .type = NLA_U32 },
 	[NL80211_ATTR_TDLS_PEER_CAPABILITY] = { .type = NLA_U32 },
+	[NL80211_ATTR_AUTHORIZATION_STATUS] = { .type = NLA_U8 },
+	[NL80211_ATTR_KEY_REPLAY_CTR] = { .type = NLA_BINARY,
+				   .len = NL80211_KEY_REPLAY_CTR_LEN },
+	[NL80211_ATTR_PSK] = { .type = NLA_BINARY,
+				   .len = NL80211_KEY_LEN_PSK },
+	[NL80211_ATTR_OFFLOAD_KEY_MGMT] = { .type = NLA_FLAG },
+	[NL80211_ATTR_KEY_MGMT_OFFLOAD_SUPPORT] = { .type = NLA_U32 },
+	[NL80211_ATTR_KEY_DERIVE_OFFLOAD_SUPPORT] = { .type = NLA_U32 },
+	[NL80211_ATTR_PMK] = { .type = NLA_BINARY,
+				   .len = NL80211_KEY_LEN_PMK },
+	[NL80211_ATTR_PMK_LEN] = { .type = NLA_U32 },
+	[NL80211_ATTR_PTK_KCK] = { .type = NLA_BINARY,
+				   .len = NL80211_KEY_LEN_PTK_KCK },
+	[NL80211_ATTR_PTK_KEK] = { .type = NLA_BINARY,
+				   .len = NL80211_KEY_LEN_PTK_KEK },
+    /* HTC_WIFI_START */
+    [NL80211_ATTR_IFACE_SOCKET_OWNER] = { .type = NLA_FLAG },
+    /* HTC_WIFI_END */
 };
 
 /* policy for the key attributes */
@@ -2512,6 +2530,16 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 	int err;
 	enum nl80211_iftype type = NL80211_IFTYPE_UNSPECIFIED;
 	u32 flags;
+/* HTC_WIFI_START */
+//check wdev value
+	struct cfg80211_registered_device *rdev_debug;
+	struct wireless_dev *wdev_debug;
+/* HTC_WIFI_END */
+
+    /* HTC_WIFI_START */
+    /* to avoid failing a new interface creation due to pending removal */
+    cfg80211_destroy_ifaces(rdev);
+    /* HTC_WIFI_END */
 
 	memset(&params, 0, sizeof(params));
 
@@ -2557,6 +2585,15 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 		return PTR_ERR(wdev);
 	}
 
+/* HTC_WIFI_START */
+//check wdev value
+	printk("add wdev %p in nl80211_new_interface\n",wdev);
+/* HTC_WIFI_END */
+    /* HTC_WIFI_START */
+    if (info->attrs[NL80211_ATTR_IFACE_SOCKET_OWNER])
+        wdev->owner_nlportid = info->snd_portid;
+    /* HTC_WIFI_END */
+
 	switch (type) {
 	case NL80211_IFTYPE_MESH_POINT:
 		if (!info->attrs[NL80211_ATTR_MESH_ID])
@@ -2586,6 +2623,16 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 		list_add_rcu(&wdev->list, &rdev->wdev_list);
 		rdev->devlist_generation++;
 		mutex_unlock(&rdev->devlist_mtx);
+/* HTC_WIFI_START */
+//check wdev value
+		rcu_read_lock();
+		list_for_each_entry_rcu(rdev_debug, &cfg80211_rdev_list, list) {
+			list_for_each_entry_rcu(wdev_debug, &rdev_debug->wdev_list, list) {
+				printk("check wdev list after add wdev in nl80211_new_interface: %p\n", wdev_debug);
+			}
+		}
+		rcu_read_unlock();
+/* HTC_WIFI_END */
 		break;
 	default:
 		break;
@@ -5217,7 +5264,10 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 	size_t ie_len;
 
 	if (!is_valid_ie_attr(info->attrs[NL80211_ATTR_IE]))
+	{
+		printk("[nl80211_trigger_scan] !is_valid_ie_attr(info->attrs[NL80211_ATTR_IE]): return -EINVAL\n");
 		return -EINVAL;
+	}
 
 	wiphy = &rdev->wiphy;
 
@@ -5234,6 +5284,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 		n_channels = validate_scan_freqs(
 				info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]);
 		if (!n_channels) {
+			printk("[nl80211_trigger_scan] !n_channels: return -EINVAL\n");
 			err = -EINVAL;
 			goto unlock;
 		}
@@ -5251,6 +5302,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 			n_ssids++;
 
 	if (n_ssids > wiphy->max_scan_ssids) {
+		printk("[nl80211_trigger_scan] n_ssids = %d > wiphy->max_scan_ssids = %d: return -EINVAL\n", n_ssids, wiphy->max_scan_ssids);
 		err = -EINVAL;
 		goto unlock;
 	}
@@ -5261,6 +5313,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 		ie_len = 0;
 
 	if (ie_len > wiphy->max_scan_ie_len) {
+		printk("[nl80211_trigger_scan] ie_len = %d > wiphy->max_scan_ie_len = %d: return -EINVAL\n", (int)ie_len, wiphy->max_scan_ie_len);
 		err = -EINVAL;
 		goto unlock;
 	}
@@ -5293,6 +5346,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 			chan = ieee80211_get_channel(wiphy, nla_get_u32(attr));
 
 			if (!chan) {
+				printk("[nl80211_trigger_scan] !chan: return -EINVAL\n");
 				err = -EINVAL;
 				goto out_free;
 			}
@@ -5327,6 +5381,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (!i) {
+		printk("[nl80211_trigger_scan] !i: return -EINVAL\n");
 		err = -EINVAL;
 		goto out_free;
 	}
@@ -5337,6 +5392,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 	if (info->attrs[NL80211_ATTR_SCAN_SSIDS]) {
 		nla_for_each_nested(attr, info->attrs[NL80211_ATTR_SCAN_SSIDS], tmp) {
 			if (nla_len(attr) > IEEE80211_MAX_SSID_LEN) {
+				printk("[nl80211_trigger_scan] nla_len(attr) = %d > IEEE80211_MAX_SSID_LEN = %d: return -EINVAL\n", nla_len(attr), IEEE80211_MAX_SSID_LEN);
 				err = -EINVAL;
 				goto out_free;
 			}
@@ -5356,6 +5412,24 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 		if (wiphy->bands[i])
 			request->rates[i] =
 				(1 << wiphy->bands[i]->n_bitrates) - 1;
+	if (info->attrs[NL80211_ATTR_SCAN_SUPP_RATES]) {
+		nla_for_each_nested(attr,
+				    info->attrs[NL80211_ATTR_SCAN_SUPP_RATES],
+				    tmp) {
+			enum ieee80211_band band = nla_type(attr);
+			if (band < 0 || band >= IEEE80211_NUM_BANDS) {
+				printk("[nl80211_trigger_scan] band < 0 || band >= IEEE80211_NUM_BANDS, band = %d: return -EINVAL\n", band);
+				err = -EINVAL;
+				goto out_free;
+			}
+			err = ieee80211_get_ratemask(wiphy->bands[band],
+						     nla_data(attr),
+						     nla_len(attr),
+						     &request->rates[band]);
+			if (err)
+				goto out_free;
+		}
+	}
 
 	for (i = 0; i < IEEE80211_NUM_BANDS; i++)
 		if (wiphy->bands[i])
@@ -5369,6 +5443,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 			enum ieee80211_band band = nla_type(attr);
 
 			if (band < 0 || band >= IEEE80211_NUM_BANDS) {
+				printk("[nl80211_trigger_scan] band < 0 || band >= IEEE80211_NUM_BANDS 2, band = %d: return -EINVAL\n", band);
 				err = -EINVAL;
 				goto out_free;
 			}
@@ -6078,7 +6153,16 @@ static int nl80211_dump_survey(struct sk_buff *skb,
 static bool nl80211_valid_wpa_versions(u32 wpa_versions)
 {
 	return !(wpa_versions & ~(NL80211_WPA_VERSION_1 |
+/* HTC_WIFI_START */
+// ** remove original code
+#if 0
 				  NL80211_WPA_VERSION_2));
+#endif
+// ** add new code
+				NL80211_WPA_VERSION_2 |
+				/*WAPI*/
+				NL80211_WAPI_VERSION_1));
+/* HTC_WIFI_END */
 }
 
 static int nl80211_authenticate(struct sk_buff *skb, struct genl_info *info)
@@ -6847,19 +6931,23 @@ EXPORT_SYMBOL(__cfg80211_alloc_event_skb);
 
 void __cfg80211_send_event_skb(struct sk_buff *skb, gfp_t gfp)
 {
+#ifdef CONFIG_NL80211_TESTMODE
 	struct cfg80211_registered_device *rdev = ((void **)skb->cb)[0];
+#endif
 	void *hdr = ((void **)skb->cb)[1];
 	struct nlattr *data = ((void **)skb->cb)[2];
 
 	nla_nest_end(skb, data);
 	genlmsg_end(skb, hdr);
 
+#ifdef CONFIG_NL80211_TESTMODE
 	if (data->nla_type == NL80211_ATTR_VENDOR_DATA)
 		genlmsg_multicast_netns(wiphy_net(&rdev->wiphy), skb, 0,
 			nl80211_vendor_mcgrp.id, gfp);
 	else
 		genlmsg_multicast_netns(wiphy_net(&rdev->wiphy), skb, 0,
 			nl80211_testmode_mcgrp.id, gfp);
+#endif
 }
 EXPORT_SYMBOL(__cfg80211_send_event_skb);
 
@@ -6991,6 +7079,12 @@ static int nl80211_connect(struct sk_buff *skb, struct genl_info *info)
 		       nla_data(info->attrs[NL80211_ATTR_VHT_CAPABILITY]),
 		       sizeof(connect.vht_capa));
 	}
+
+	if (nla_get_flag(info->attrs[NL80211_ATTR_OFFLOAD_KEY_MGMT]))
+		connect.flags |= ASSOC_REQ_OFFLOAD_KEY_MGMT;
+
+	if (info->attrs[NL80211_ATTR_PSK])
+		connect.psk = nla_data(info->attrs[NL80211_ATTR_PSK]);
 
 	err = cfg80211_connect(rdev, dev, &connect, connkeys);
 	if (err)
@@ -8718,6 +8812,28 @@ static int nl80211_set_qos_map(struct sk_buff *skb,
 	return ret;
 }
 
+static int nl80211_key_mgmt_set_pmk(struct sk_buff *skb, struct genl_info *info)
+{
+	struct cfg80211_registered_device *rdev = info->user_ptr[0];
+	struct net_device *dev = info->user_ptr[1];
+	u8 *pmk;
+	size_t pmk_len;
+
+	if (info->attrs[NL80211_ATTR_PMK])
+		pmk = nla_data(info->attrs[NL80211_ATTR_PMK]);
+	else
+		return -EINVAL;
+	if (info->attrs[NL80211_ATTR_PMK_LEN])
+		pmk_len = nla_get_u32(info->attrs[NL80211_ATTR_PMK_LEN]);
+	else
+		return -EINVAL;
+
+	if (!rdev->ops->key_mgmt_set_pmk)
+		return -EOPNOTSUPP;
+
+	return rdev_key_mgmt_set_pmk(rdev, dev, pmk, pmk_len);
+}
+
 #define NL80211_FLAG_NEED_WIPHY		0x01
 #define NL80211_FLAG_NEED_NETDEV	0x02
 #define NL80211_FLAG_NEED_RTNL		0x04
@@ -9442,6 +9558,14 @@ static struct genl_ops nl80211_ops[] = {
 	{
 		.cmd = NL80211_CMD_SET_QOS_MAP,
 		.doit = nl80211_set_qos_map,
+		.policy = nl80211_policy,
+		.flags = GENL_ADMIN_PERM,
+		.internal_flags = NL80211_FLAG_NEED_NETDEV_UP |
+				  NL80211_FLAG_NEED_RTNL,
+	},
+	{
+		.cmd = NL80211_CMD_KEY_MGMT_SET_PMK,
+		.doit = nl80211_key_mgmt_set_pmk,
 		.policy = nl80211_policy,
 		.flags = GENL_ADMIN_PERM,
 		.internal_flags = NL80211_FLAG_NEED_NETDEV_UP |
@@ -11132,8 +11256,20 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 	rcu_read_lock();
 
 	list_for_each_entry_rcu(rdev, &cfg80211_rdev_list, list) {
+        /* HTC_WIFI_START */
+        // ** remove original code here
+        /*
 		list_for_each_entry_rcu(wdev, &rdev->wdev_list, list)
 			cfg80211_mlme_unregister_socket(wdev, notify->portid);
+        */
+        // ** add new code here
+        bool schedule_destroy_work = false;
+        list_for_each_entry_rcu(wdev, &rdev->wdev_list, list) {
+            cfg80211_mlme_unregister_socket(wdev, notify->portid);
+            if (wdev->owner_nlportid == notify->portid)
+                schedule_destroy_work = true;
+        }
+        /* HTC_WIFI_END */
 
 		spin_lock_bh(&rdev->beacon_registrations_lock);
 		list_for_each_entry_safe(reg, tmp, &rdev->beacon_registrations,
@@ -11145,6 +11281,21 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 			}
 		}
 		spin_unlock_bh(&rdev->beacon_registrations_lock);
+
+        /* HTC_WIFI_START */
+        if (schedule_destroy_work) {
+            struct cfg80211_iface_destroy *destroy;
+
+            destroy = kzalloc(sizeof(*destroy), GFP_ATOMIC);
+            if (destroy) {
+                destroy->nlportid = notify->portid;
+                spin_lock(&rdev->destroy_list_lock);
+                list_add(&destroy->list, &rdev->destroy_list);
+                spin_unlock(&rdev->destroy_list_lock);
+                schedule_work(&rdev->destroy_work);
+            }
+        }
+        /* HTC_WIFI_END */
 	}
 
 	rcu_read_unlock();
@@ -11254,6 +11405,127 @@ void cfg80211_ap_stopped(struct net_device *netdev, gfp_t gfp)
 }
 EXPORT_SYMBOL(cfg80211_ap_stopped);
 
+void __cfg80211_authorization_event(struct net_device *dev,
+			    enum nl80211_authorization_status auth_status,
+			    const u8 *key_replay_ctr, const u8 *ptk_kck,
+			    const u8 *ptk_kek)
+{
+	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	struct cfg80211_registered_device *rdev = wiphy_to_dev(wdev->wiphy);
+	struct sk_buff *msg;
+	void *hdr;
+	int err;
+
+	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+	if (!msg)
+		return;
+
+	hdr = nl80211hdr_put(msg, 0, 0, 0, NL80211_CMD_AUTHORIZATION_EVENT);
+	if (!hdr) {
+		nlmsg_free(msg);
+		return;
+	}
+
+	if (nla_put_u32(msg, NL80211_ATTR_WIPHY, rdev->wiphy_idx) ||
+	    nla_put_u32(msg, NL80211_ATTR_IFINDEX, dev->ifindex) ||
+	    nla_put_u8(msg, NL80211_ATTR_AUTHORIZATION_STATUS, auth_status) ||
+	    nla_put(msg, NL80211_ATTR_KEY_REPLAY_CTR,
+			  NL80211_KEY_REPLAY_CTR_LEN, key_replay_ctr) ||
+	    nla_put(msg, NL80211_ATTR_PTK_KCK, NL80211_KEY_LEN_PTK_KCK,
+			  ptk_kck) ||
+	    nla_put(msg, NL80211_ATTR_PTK_KEK, NL80211_KEY_LEN_PTK_KEK,
+			  ptk_kek))
+		goto nla_put_failure;
+
+	err = genlmsg_end(msg, hdr);
+	if (err < 0) {
+		nlmsg_free(msg);
+		return;
+	}
+
+	genlmsg_multicast_netns(wiphy_net(&rdev->wiphy), msg, 0,
+				nl80211_mlme_mcgrp.id, GFP_KERNEL);
+	return;
+
+nla_put_failure:
+	genlmsg_cancel(msg, hdr);
+	nlmsg_free(msg);
+}
+
+void cfg80211_authorization_event(struct net_device *dev,
+				  enum nl80211_authorization_status auth_status,
+				  const u8 *key_replay_ctr,
+				  gfp_t gfp)
+{
+	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	struct cfg80211_registered_device *rdev = wiphy_to_dev(wdev->wiphy);
+	struct cfg80211_event *ev;
+	unsigned long flags;
+
+	/* Valid only in SME_CONNECTED state */
+	if (wdev->sme_state != CFG80211_SME_CONNECTED)
+		return;
+
+	ev = kzalloc(sizeof(*ev), gfp);
+	if (!ev)
+		return;
+
+	trace_cfg80211_authorization_event(wdev->wiphy, dev, auth_status);
+
+	ev->type = EVENT_AUTHORIZATION;
+	ev->au.auth_status = auth_status;
+	memcpy(ev->au.key_replay_ctr, key_replay_ctr,
+		NL80211_KEY_REPLAY_CTR_LEN);
+
+	spin_lock_irqsave(&wdev->event_lock, flags);
+	list_add_tail(&ev->list, &wdev->event_list);
+	spin_unlock_irqrestore(&wdev->event_lock, flags);
+	queue_work(cfg80211_wq, &rdev->event_work);
+}
+EXPORT_SYMBOL(cfg80211_authorization_event);
+
+void cfg80211_key_mgmt_auth(struct net_device *dev,
+			    struct cfg80211_auth_params *auth_params,
+			    gfp_t gfp)
+{
+	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	struct cfg80211_registered_device *rdev = wiphy_to_dev(wdev->wiphy);
+	struct cfg80211_event *ev;
+	unsigned long flags;
+
+	/* Valid only in SME_CONNECTED state */
+	if (wdev->sme_state != CFG80211_SME_CONNECTED)
+		return;
+
+	ev = kzalloc(sizeof(*ev), gfp);
+	if (!ev)
+		return;
+
+	trace_cfg80211_authorization_event(wdev->wiphy, dev,
+					   auth_params->status);
+
+	ev->type = EVENT_AUTHORIZATION;
+	ev->au.auth_status = auth_params->status;
+	if (auth_params->key_replay_ctr) {
+		memcpy(ev->au.key_replay_ctr, auth_params->key_replay_ctr,
+		       NL80211_KEY_REPLAY_CTR_LEN);
+	}
+	if (auth_params->ptk_kck) {
+		memcpy(ev->au.ptk_kck, auth_params->ptk_kck,
+		       NL80211_KEY_LEN_PTK_KCK);
+	}
+	if (auth_params->ptk_kek) {
+		memcpy(ev->au.ptk_kek, auth_params->ptk_kek,
+		       NL80211_KEY_LEN_PTK_KEK);
+	}
+
+	spin_lock_irqsave(&wdev->event_lock, flags);
+	list_add_tail(&ev->list, &wdev->event_list);
+	spin_unlock_irqrestore(&wdev->event_lock, flags);
+	queue_work(cfg80211_wq, &rdev->event_work);
+}
+EXPORT_SYMBOL(cfg80211_key_mgmt_auth);
+
 /* initialisation/exit functions */
 
 int nl80211_init(void)
@@ -11285,11 +11557,11 @@ int nl80211_init(void)
 	err = genl_register_mc_group(&nl80211_fam, &nl80211_testmode_mcgrp);
 	if (err)
 		goto err_out;
-#endif
 
 	err = genl_register_mc_group(&nl80211_fam, &nl80211_vendor_mcgrp);
 	if (err)
 		goto err_out;
+#endif
 
 	err = netlink_register_notifier(&nl80211_netlink_notifier);
 	if (err)

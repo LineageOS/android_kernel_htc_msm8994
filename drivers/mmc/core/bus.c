@@ -26,7 +26,7 @@
 #include "bus.h"
 
 #define to_mmc_driver(d)	container_of(d, struct mmc_driver, drv)
-#define RUNTIME_SUSPEND_DELAY_MS 10000
+#define RUNTIME_SUSPEND_DELAY_MS 300000
 
 static ssize_t mmc_type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -373,6 +373,14 @@ int mmc_add_card(struct mmc_card *card)
 	switch (card->type) {
 	case MMC_TYPE_MMC:
 		type = "MMC";
+		if (stats_workqueue && !card->host->perf_enable) {
+			card->host->perf_enable = true;
+			queue_delayed_work(stats_workqueue, &card->host->stats_work,
+					msecs_to_jiffies(MMC_STATS_INTERVAL));
+		}
+
+		if (card->host->mmc_circbuf.buf)
+			card->host->circbuf_enable = true;
 		break;
 	case MMC_TYPE_SD:
 		type = "SD";
@@ -382,6 +390,14 @@ int mmc_add_card(struct mmc_card *card)
 			else
 				type = "SDHC";
 		}
+		if (stats_workqueue && !card->host->perf_enable) {
+			card->host->perf_enable = true;
+			queue_delayed_work(stats_workqueue, &card->host->stats_work,
+					msecs_to_jiffies(MMC_STATS_INTERVAL));
+		}
+
+		if (card->host->mmc_circbuf.buf)
+			card->host->circbuf_enable = true;
 		break;
 	case MMC_TYPE_SDIO:
 		type = "SDIO";
@@ -480,6 +496,10 @@ void mmc_remove_card(struct mmc_card *card)
 		}
 		device_del(&card->dev);
 	}
+
+	card->host->circbuf_enable = false;
+	if (card->host->mmc_circbuf.buf)
+		memset(card->host->mmc_circbuf.buf, 0, CIRC_BUFFER_SIZE);
 
 	kfree(card->wr_pack_stats.packing_events);
 	kfree(card->cached_ext_csd);

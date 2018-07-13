@@ -768,6 +768,7 @@ static int tspp_get_pinctrl(struct tspp_device *device)
 	}
 	device->pinctrl.tsif0_mode2 = state;
 
+	/*++ DTV_PCN_B3_REMOVE_TSIF1
 	state = pinctrl_lookup_state(pinctrl, "tsif1-mode1");
 	if (IS_ERR(state)) {
 		pr_err("%s: Unable to find state %s\n",
@@ -799,7 +800,8 @@ static int tspp_get_pinctrl(struct tspp_device *device)
 		return -EINVAL;
 	}
 	device->pinctrl.dual_mode2 = state;
-
+	-- DTV_PCN_B3_REMOVE_TSIF1*/
+	
 	device->pinctrl.tsif0_active = false;
 	device->pinctrl.tsif1_active = false;
 
@@ -2922,6 +2924,7 @@ static int msm_tspp_probe(struct platform_device *pdev)
 	/* stop the clocks for power savings */
 	tspp_clock_stop(device);
 
+	printk("%s:TSPP probe is OK!",__func__);
 	/* everything is ok, so add the device to the list */
 	list_add_tail(&(device->devlist), &tspp_devices);
 	return 0;

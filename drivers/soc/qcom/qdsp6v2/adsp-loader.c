@@ -145,6 +145,12 @@ load_adsp:
 	}
 fail:
 	dev_err(&pdev->dev, "%s: Q6 image loading failed\n", __func__);
+//HTC_START_START
+#ifdef CONFIG_HTC_DEBUG_DSP
+	pr_err("[AUD] %s: adsp loading failed", __func__);
+	BUG();
+#endif
+//HTC_START_END
 	return;
 }
 

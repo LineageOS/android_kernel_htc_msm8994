@@ -1849,7 +1849,6 @@ static int init_cluster_control(void)
 		managed_clusters[i]->pcpu_multi_exit_load = DEF_PCPU_MULTI_EX;
 		managed_clusters[i]->multi_enter_cycles = DEF_MULTI_ENTER_CYCLE;
 		managed_clusters[i]->multi_exit_cycles = DEF_MULTI_EXIT_CYCLE;
-
 		spin_lock_init(&(managed_clusters[i]->iowait_lock));
 		spin_lock_init(&(managed_clusters[i]->mode_lock));
 		spin_lock_init(&(managed_clusters[i]->timer_lock));

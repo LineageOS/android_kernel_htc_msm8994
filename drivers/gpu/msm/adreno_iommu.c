@@ -870,7 +870,7 @@ int adreno_iommu_set_pt(struct adreno_ringbuffer *rb,
 	struct kgsl_device *device = rb->device;
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct kgsl_pagetable *cur_pt = device->mmu.defaultpagetable;
-	int result;
+	int result = 0;
 	int cpu_path = 0;
 
 	if (rb->drawctxt_active)

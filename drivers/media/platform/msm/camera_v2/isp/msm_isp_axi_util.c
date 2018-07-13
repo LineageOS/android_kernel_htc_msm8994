@@ -14,6 +14,15 @@
 #include <asm/div64.h>
 #include "msm_isp_util.h"
 #include "msm_isp_axi_util.h"
+//HTC_START, count sensor fps
+#include <linux/time.h>
+#define SENSOR_ISP_MAX 2
+//HTC_END
+//HTC_START, for subcam no ack issue
+int g_subcam_SOF = 0;
+extern int g_subcam_vfe_intf;
+extern int g_subcam_no_ack;
+//HTC_END
 
 #define SRC_TO_INTF(src) \
 	((src < RDI_INTF_0 || src == VFE_AXI_SRC_MAX) ? VFE_PIX_0 : \
@@ -617,6 +626,12 @@ void msm_isp_notify(struct vfe_device *vfe_dev, uint32_t event_type,
 	enum msm_vfe_input_src frame_src, struct msm_isp_timestamp *ts)
 {
 	struct msm_isp_event_data event_data;
+	//HTC_START, count sensor fps
+	static struct timeval m_last[SENSOR_ISP_MAX];
+	struct timeval m_curr;
+	static uint32_t last_frame_id[SENSOR_ISP_MAX];
+	uint32_t time_diff = 0;
+	//HTC_END
 	uint32_t i = 0;
 	struct msm_vfe_axi_halt_cmd halt_cmd;
 	struct msm_isp_event_data error_event;
@@ -626,6 +641,37 @@ void msm_isp_notify(struct vfe_device *vfe_dev, uint32_t event_type,
 
 	switch (event_type) {
 	case ISP_EVENT_SOF: {
+		//HTC_START, count sensor fps
+		if (frame_src == VFE_PIX_0) {
+			if ((vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id < 3)||
+				(vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id == 10))
+			{
+				pr_info("[CAM]%s:(%d)PIX0 frame id: %u\n", __func__, vfe_dev->pdev->id,
+					vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id);
+			}
+
+			if(vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id == 0)
+			{
+				do_gettimeofday(&m_last[vfe_dev->pdev->id]);
+				last_frame_id[vfe_dev->pdev->id] = 0;
+			}
+			else
+			{
+				do_gettimeofday(&m_curr);
+				time_diff = (m_curr.tv_sec-m_last[vfe_dev->pdev->id].tv_sec)*1000000 + (m_curr.tv_usec-m_last[vfe_dev->pdev->id].tv_usec);
+				if(time_diff >= 1000000)   //1s
+				{
+					pr_info("[CAM]%s:(%d)PIX0 frame id: %u, fps: %d\n", __func__, vfe_dev->pdev->id, vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id, (vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id-last_frame_id[vfe_dev->pdev->id]));
+					m_last[vfe_dev->pdev->id] = m_curr;
+					last_frame_id[vfe_dev->pdev->id] = vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id;
+				}
+			}
+		}
+		//HTC_END
+		//HTC_START, for subcam no ack issue
+		if(vfe_dev->pdev->id == g_subcam_vfe_intf && g_subcam_SOF < 100)
+			g_subcam_SOF ++;
+		//HTC_END
 		src_info = &vfe_dev->axi_data.src_info[frame_src];
 
 		if (frame_src == VFE_PIX_0) {
@@ -1163,6 +1209,7 @@ static void msm_isp_get_done_buf(struct vfe_device *vfe_dev,
 	uint32_t pingpong_bit = 0, i;
 	struct msm_isp_event_data error_event;
 	struct msm_vfe_axi_halt_cmd halt_cmd;
+	memset(&error_event, 0, sizeof(error_event));
 	pingpong_bit = (~(pingpong_status >> stream_info->wm[0]) & 0x1);
 	for (i = 0; i < stream_info->num_planes; i++) {
 		if (pingpong_bit !=
@@ -1453,6 +1500,7 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 			struct msm_isp_event_data error_event;
 			struct msm_vfe_axi_halt_cmd halt_cmd;
 
+			memset(&error_event, 0, sizeof(error_event));
 			halt_cmd.overflow_detected = 1;
 			halt_cmd.stop_camif = 1;
 			halt_cmd.blocking_halt = 0;
@@ -1501,11 +1549,25 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 				__func__, vfe_dev->pdev->id, buf->buf_idx,
 				buf->bufq_handle);
 
+		//HTC_START Enable more isp log
+		if (buf_event.frame_id < 10 || !(buf_event.frame_id%30))
+			pr_info("%s: ISP_EVENT_BUF_DIVERT Session id %d, Stream id %d, Frame id %d\n",
+				__func__, buf_event.u.buf_done.session_id, buf_event.u.buf_done.stream_id, buf_event.frame_id);
+		//HTC_END
+
 			msm_isp_send_event(vfe_dev, ISP_EVENT_BUF_DIVERT +
 				stream_idx, &buf_event);
 		} else {
 			ISP_DBG("%s: vfe_id %d send buf done buf-id %d\n",
 				__func__, vfe_dev->pdev->id, buf->buf_idx);
+
+		//HTC_START Enable more isp log
+		if ((buf_event.u.buf_done.stream_id != 3 && buf_event.u.buf_done.stream_id <= 6) ||
+			buf_event.frame_id < 10 || !(buf_event.frame_id%30))
+			pr_info("%s: ISP_EVENT_BUF_DONE  Session id %d, Stream id %d, Frame id %d\n",
+				__func__, buf_event.u.buf_done.session_id, buf_event.u.buf_done.stream_id, buf_event.frame_id);
+		//HTC_END
+
 			msm_isp_send_event(vfe_dev, ISP_EVENT_BUF_DONE,
 				&buf_event);
 			vfe_dev->buf_mgr->ops->buf_done(vfe_dev->buf_mgr,
@@ -1722,6 +1784,15 @@ static int msm_isp_axi_wait_for_cfg_done(struct vfe_device *vfe_dev,
 		vfe_dev->axi_data.pipeline_update = camif_update;
 	}
 	spin_unlock_irqrestore(&vfe_dev->shared_data_lock, flags);
+	//HTC_START, for subcam no ack issue
+	if(g_subcam_no_ack == 1 && vfe_dev->pdev->id == g_subcam_vfe_intf)
+	{
+		rc = wait_for_completion_interruptible_timeout(
+			&vfe_dev->stream_config_complete,
+			msecs_to_jiffies(100));
+	}
+	else
+	//HTC_END
 	rc = wait_for_completion_timeout(
 		&vfe_dev->stream_config_complete,
 		msecs_to_jiffies(VFE_MAX_CFG_TIMEOUT));

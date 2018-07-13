@@ -864,8 +864,13 @@ static struct mdss_mdp_pipe *mdss_mdp_pipe_init(struct mdss_mdp_mixer *mixer,
 		break;
 	}
 
+	if (!pipe_pool) {
+		pr_err("FATAL: pipe_pool cannot be NULL\n");
+		return ERR_PTR(-EINVAL);
+	}
+
 	/* allocate lower priority right blend pipe */
-	if (left_blend_pipe && (left_blend_pipe->type == type) && pipe_pool) {
+	if (left_blend_pipe && (left_blend_pipe->type == type)) {
 		struct mdss_mdp_pipe *pool_head = pipe_pool + off;
 		off += left_blend_pipe->priority - pool_head->priority + 1;
 		if (off >= npipes) {

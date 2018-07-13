@@ -109,6 +109,7 @@ struct smbchg_chip {
 	int				safety_time;
 	int				prechg_safety_time;
 	int				bmd_pin_src;
+	int				resume_soc_threshold;
 	int				jeita_temp_hard_limit;
 	bool				use_vfloat_adjustments;
 	bool				iterm_disabled;
@@ -217,7 +218,6 @@ struct smbchg_chip {
 	bool				psy_registered;
 
 	struct smbchg_regulator		otg_vreg;
-	struct smbchg_regulator		ext_otg_vreg;
 	struct work_struct		usb_set_online_work;
 	struct delayed_work		vfloat_adjust_work;
 	struct delayed_work		hvdcp_det_work;
@@ -3331,12 +3331,8 @@ static int smbchg_regulator_init(struct smbchg_chip *chip)
 	int rc = 0;
 	struct regulator_init_data *init_data;
 	struct regulator_config cfg = {};
-	struct device_node *regulator_node;
 
-	regulator_node = of_get_child_by_name(chip->dev->of_node,
-			"qcom,smbcharger-boost-otg");
-
-	init_data = of_get_regulator_init_data(chip->dev, regulator_node);
+	init_data = of_get_regulator_init_data(chip->dev, chip->dev->of_node);
 	if (!init_data) {
 		dev_err(chip->dev, "Unable to allocate memory\n");
 		return -ENOMEM;
@@ -3351,7 +3347,7 @@ static int smbchg_regulator_init(struct smbchg_chip *chip)
 		cfg.dev = chip->dev;
 		cfg.init_data = init_data;
 		cfg.driver_data = chip;
-		cfg.of_node = regulator_node;
+		cfg.of_node = chip->dev->of_node;
 
 		init_data->constraints.valid_ops_mask
 			|= REGULATOR_CHANGE_STATUS;
@@ -3367,49 +3363,6 @@ static int smbchg_regulator_init(struct smbchg_chip *chip)
 		}
 	}
 
-	if (rc)
-		return rc;
-
-	regulator_node = of_get_child_by_name(chip->dev->of_node,
-			"qcom,smbcharger-external-otg");
-	if (!regulator_node) {
-		dev_dbg(chip->dev, "external-otg node absent\n");
-		return 0;
-	}
-	init_data = of_get_regulator_init_data(chip->dev, regulator_node);
-	if (!init_data) {
-		dev_err(chip->dev, "Unable to allocate memory\n");
-		return -ENOMEM;
-	}
-
-	if (init_data->constraints.name) {
-		if (of_get_property(chip->dev->of_node,
-					"otg-parent-supply", NULL))
-			init_data->supply_regulator = "otg-parent";
-		chip->ext_otg_vreg.rdesc.owner = THIS_MODULE;
-		chip->ext_otg_vreg.rdesc.type = REGULATOR_VOLTAGE;
-		chip->ext_otg_vreg.rdesc.ops = &smbchg_external_otg_reg_ops;
-		chip->ext_otg_vreg.rdesc.name = init_data->constraints.name;
-
-		cfg.dev = chip->dev;
-		cfg.init_data = init_data;
-		cfg.driver_data = chip;
-		cfg.of_node = regulator_node;
-
-		init_data->constraints.valid_ops_mask
-			|= REGULATOR_CHANGE_STATUS;
-
-		chip->ext_otg_vreg.rdev = regulator_register(
-					&chip->ext_otg_vreg.rdesc, &cfg);
-		if (IS_ERR(chip->ext_otg_vreg.rdev)) {
-			rc = PTR_ERR(chip->ext_otg_vreg.rdev);
-			chip->ext_otg_vreg.rdev = NULL;
-			if (rc != -EPROBE_DEFER)
-				dev_err(chip->dev,
-					"external OTG reg failed, rc=%d\n", rc);
-		}
-	}
-
 	return rc;
 }
 
@@ -3417,8 +3370,6 @@ static void smbchg_regulator_deinit(struct smbchg_chip *chip)
 {
 	if (chip->otg_vreg.rdev)
 		regulator_unregister(chip->otg_vreg.rdev);
-	if (chip->ext_otg_vreg.rdev)
-		regulator_unregister(chip->ext_otg_vreg.rdev);
 }
 
 static int vf_adjust_low_threshold = 5;

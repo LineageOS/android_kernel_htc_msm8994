@@ -846,6 +846,11 @@ static void v4l_print_freq_band(const void *arg, bool write_only)
 			p->rangehigh, p->modulation);
 }
 
+static void v4l_htc_print_callpidname(const void *arg, bool write_only)
+{
+    pr_cont("value=%u\n", *(const u32 *)arg);
+}
+
 static void v4l_print_u32(const void *arg, bool write_only)
 {
 	pr_cont("value=%u\n", *(const u32 *)arg);
@@ -1901,6 +1906,15 @@ static int v4l_dbg_g_chip_info(const struct v4l2_ioctl_ops *ops,
 #endif
 }
 
+/* HTC_START */
+static int v4l_htc_set_callpidname(const struct v4l2_ioctl_ops *ops,
+                struct file *file, void *fh, void *arg)
+{
+    struct htc_callingpid_data *b = arg;
+    return ops->vidioc_htc_set_callingpid_name(file, fh, b);
+}
+/* HTC_END */
+
 static int v4l_dqevent(const struct v4l2_ioctl_ops *ops,
 				struct file *file, void *fh, void *arg)
 {
@@ -2116,6 +2130,7 @@ static struct v4l2_ioctl_info v4l2_ioctls[] = {
 	IOCTL_INFO_STD(VIDIOC_DV_TIMINGS_CAP, vidioc_dv_timings_cap, v4l_print_dv_timings_cap, INFO_FL_CLEAR(v4l2_dv_timings_cap, type)),
 	IOCTL_INFO_FNC(VIDIOC_ENUM_FREQ_BANDS, v4l_enum_freq_bands, v4l_print_freq_band, 0),
 	IOCTL_INFO_FNC(VIDIOC_DBG_G_CHIP_INFO, v4l_dbg_g_chip_info, v4l_print_dbg_chip_info, INFO_FL_CLEAR(v4l2_dbg_chip_info, match)),
+    IOCTL_INFO_FNC(VIDIOC_HTC_SET_CALLPIDNAME, v4l_htc_set_callpidname, v4l_htc_print_callpidname, INFO_FL_QUEUE),
 };
 #define V4L2_IOCTLS ARRAY_SIZE(v4l2_ioctls)
 

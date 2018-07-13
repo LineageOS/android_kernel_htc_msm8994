@@ -55,6 +55,10 @@ int msm_ispif_get_clk_info(struct ispif_device *ispif_dev,
 	struct msm_cam_clk_info *ahb_clk_info,
 	struct msm_cam_clk_info *clk_info);
 
+//HTC_START, for subcam no ack issue
+int g_subcam_vfe_intf = 0;
+//HTC_END
+
 static void msm_ispif_io_dump_reg(struct ispif_device *ispif)
 {
 	if (!ispif->enb_dump_reg)
@@ -609,6 +613,14 @@ static int msm_ispif_config(struct ispif_device *ispif,
 		intftype = params->entries[i].intftype;
 
 		vfe_intf = params->entries[i].vfe_intf;
+
+		//HTC_START, for subcam no ack issue
+		if(params->entries[i].csid == 2)   //sub cam csid
+		{
+		    g_subcam_vfe_intf = vfe_intf;
+		    pr_info("[CAM]-sub, %s: sub cam vfe_intf %d\n", __func__, g_subcam_vfe_intf);
+		}
+		//HTC_END
 
 		CDBG("%s intftype %x, vfe_intf %d, csid %d\n", __func__,
 			intftype, vfe_intf, params->entries[i].csid);

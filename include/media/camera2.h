@@ -40,12 +40,20 @@ enum msm_bus_perf_setting {
 	S_EXIT
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
+struct msm_camera_slave_info {
+	uint16_t sensor_slave_addr;
+	uint16_t sensor_id_reg_addr;
+	uint16_t sensor_id;
+};
+#else
 struct msm_camera_slave_info {
 	uint16_t sensor_slave_addr;
 	uint16_t sensor_id_reg_addr;
 	uint16_t sensor_id;
 	uint16_t sensor_id_mask;
 };
+#endif
 
 struct msm_cam_clk_info {
 	const char *clk_name;

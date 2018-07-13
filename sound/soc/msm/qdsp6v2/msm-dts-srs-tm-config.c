@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, 2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -165,7 +165,7 @@ static int msm_dts_srs_trumedia_control_mi2s_set(struct snd_kcontrol *kcontrol,
 
 	pr_debug("SRS control MI2S called\n");
 	msm_pcm_routing_acquire_lock();
-	port_id = AFE_PORT_ID_PRIMARY_MI2S_RX;
+	port_id = AFE_PORT_ID_QUATERNARY_MI2S_RX; // HTC_AUD
 	ret = msm_dts_srs_trumedia_control_set_(port_id, kcontrol, ucontrol);
 	msm_pcm_routing_release_lock();
 	return ret;
@@ -292,7 +292,7 @@ static int reg_ion_mem(void)
 				 &po.kvaddr);
 	if (rc != 0)
 		pr_err("%s: failed to allocate memory.\n", __func__);
-		pr_debug("%s: exited ion_client = %p, ion_handle = %p, phys_addr = %lu, length = %d, vaddr = %p, rc = 0x%x\n",
+		pr_debug("%s: exited ion_client = %pK, ion_handle = %pK, phys_addr = %lu, length = %d, vaddr = %pK, rc = 0x%x\n",
 			__func__, ion_client, ion_handle, (long)po.paddr,
 			(unsigned int)po.size, po.kvaddr, rc);
 	return rc;

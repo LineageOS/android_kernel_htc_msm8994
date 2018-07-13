@@ -428,9 +428,10 @@ static int __msm_map_iommu_common(
 
 	if (!iommu_meta) {
 		iommu_meta = msm_iommu_meta_create(dma_buf, table, size);
-
 		if (IS_ERR(iommu_meta)) {
 			mutex_unlock(&msm_iommu_map_mutex);
+			pr_err("%s: fail to create meta\n", __func__);
+
 			ret = PTR_ERR(iommu_meta);
 			goto out;
 		}
