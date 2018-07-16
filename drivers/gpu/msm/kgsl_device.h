@@ -181,7 +181,6 @@ struct kgsl_functable {
 		struct kgsl_context *context);
 	void (*resume)(struct kgsl_device *device);
 	void (*regulator_enable)(struct kgsl_device *);
-	bool (*is_hw_collapsible)(struct kgsl_device *);
 	void (*regulator_disable)(struct kgsl_device *);
 	void (*pwrlevel_change_settings)(struct kgsl_device *device,
 		bool mask_throttle);
