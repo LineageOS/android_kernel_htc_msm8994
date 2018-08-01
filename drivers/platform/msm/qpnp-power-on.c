@@ -280,6 +280,8 @@ qpnp_pon_masked_write_for_pmi(struct qpnp_pon *pon, u16 addr, u8 mask, u8 val)
 			"Unable to write to addr=%hx, rc(%d)\n", addr, rc);
 	return rc;
 }
+
+#ifdef CONFIG_HTC_POWER_DEBUG
 static int qpnp_pon_readl(struct qpnp_pon *pon, u16 addr, u8 *reg)
 {
 	int rc = 0;
@@ -312,7 +314,6 @@ static int qpnp_pon_readl_for_pmi(struct qpnp_pon *pon, u16 addr, u8 *reg)
 	return rc;
 }
 
-#ifdef CONFIG_HTC_POWER_DEBUG
 static u8 htc_dump_pon_reg[] =
 {
 	0x40,	/* PON_KPDPWR_N_RESET_S1_TIMER			*/
