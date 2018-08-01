@@ -1451,8 +1451,10 @@ static void retire_playback_urb(struct snd_usb_substream *subs,
 static int snd_usb_playback_open(struct snd_pcm_substream *substream)
 {
 	// HTC_AUD_START
+#ifdef CONFIG_HTC_POWER_DEBUG
 	pr_info("%s htc_disable_partial_pm_log_for_audio: 1\n", __func__);
 	htc_disable_partial_pm_log_for_audio(true);
+#endif
 	// HTC_AUD_END
 
 	return snd_usb_pcm_open(substream, SNDRV_PCM_STREAM_PLAYBACK);
@@ -1461,8 +1463,10 @@ static int snd_usb_playback_open(struct snd_pcm_substream *substream)
 static int snd_usb_playback_close(struct snd_pcm_substream *substream)
 {
 	// HTC_AUD_START
+#ifdef CONFIG_HTC_POWER_DEBUG
 	pr_info("%s htc_disable_partial_pm_log_for_audio: 0\n", __func__);
 	htc_disable_partial_pm_log_for_audio(false);
+#endif
 	// HTC_AUD_END
 
 	return snd_usb_pcm_close(substream, SNDRV_PCM_STREAM_PLAYBACK);
