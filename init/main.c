@@ -743,14 +743,14 @@ int __init_or_module do_one_initcall(initcall_t fn)
 	int count = preempt_count();
 	int ret;
 
-#ifdef CONFIG_HTC_EARLY_RTB
+#if defined(CONFIG_HTC_EARLY_RTB) && defined(CONFIG_HTC_DEBUG_RTB)
 	uncached_logk_pc(LOGK_INITCALL, (void *)fn, (void *)(0x00000000));
 #endif
 	if (initcall_debug)
 		ret = do_one_initcall_debug(fn);
 	else
 		ret = fn();
-#ifdef CONFIG_HTC_EARLY_RTB
+#if defined(CONFIG_HTC_EARLY_RTB) && defined(CONFIG_HTC_DEBUG_RTB)
 	uncached_logk_pc(LOGK_INITCALL, (void *)fn, (void *)(0xffffffff));
 #endif
 
