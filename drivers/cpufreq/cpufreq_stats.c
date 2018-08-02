@@ -617,7 +617,7 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 	else if (val == CPUFREQ_REMOVE_POLICY)
 		__cpufreq_stats_free_table(policy);
 
-	return (ret == -EBUSY)? 0 : ret;
+	return ret;
 }
 
 static void cpufreq_stats_create_table(unsigned int cpu)
