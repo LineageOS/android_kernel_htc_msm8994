@@ -236,11 +236,8 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 	/* now start the actual lookup procedure */
 	lower_dir_dentry = lower_parent_path->dentry;
 	lower_dir_mnt = lower_parent_path->mnt;
+
 	/* Use vfs_path_lookup to check if the dentry exists or not */
-#ifdef CONFIG_SDCARD_FS_CI_SEARCH
-	err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, name,
-				LOOKUP_CASE_INSENSITIVE, &lower_path);
-#else
 	err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, name, 0,
 				&lower_path);
 	/* check for other cases */
@@ -248,7 +245,7 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 		struct dentry *child;
 		struct dentry *match = NULL;
 		spin_lock(&lower_dir_dentry->d_lock);
-		list_for_each_entry(child, &lower_dir_dentry->d_subdirs, d_child) {
+		list_for_each_entry(child, &lower_dir_dentry->d_subdirs, d_u.d_child) {
 			if (child && child->d_inode) {
 				if (strcasecmp(child->d_name.name, name)==0) {
 					match = dget(child);
@@ -265,7 +262,6 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 			dput(match);
 		}
 	}
-#endif
 
 	/* no error: handle positive dentries */
 	if (!err) {

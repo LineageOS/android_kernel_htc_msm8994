@@ -19,26 +19,17 @@
  */
 
 #include "sdcardfs.h"
-#include <linux/delay.h>
 #include <linux/hashtable.h>
+#include <linux/delay.h>
+
+
 #include <linux/init.h>
-#include <linux/inotify.h>
-#include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/syscalls.h>
 
 #include <linux/configfs.h>
 
 #define STRING_BUF_SIZE		(512)
-
-#ifdef CONFIG_SDCARD_FS_ANDROID_PKGLIST
-/* Path to system-provided mapping of package name to appIds */
-static const char* const kpackageslist_file = "/data/system/packages.list";
-
-/* Supplementary groups to execute with */
-static const gid_t kgroups[1] = { AID_PACKAGE_INFO };
-#endif
 
 struct hashtable_entry {
 	struct hlist_node hlist;
@@ -53,14 +44,8 @@ struct sb_list {
 
 struct packagelist_data {
 	DECLARE_HASHTABLE(package_to_appid,8);
-	spinlock_t hashtable_lock;
-#ifdef CONFIG_SDCARD_FS_ANDROID_PKGLIST
-	struct task_struct *thread_id;
-#endif
-	char read_buf[STRING_BUF_SIZE];
-	char event_buf[STRING_BUF_SIZE];
-	char app_name_buf[STRING_BUF_SIZE];
-	char gids_buf[STRING_BUF_SIZE];
+	struct mutex hashtable_lock;
+
 };
 
 static struct packagelist_data *pkgl_data_all;
@@ -86,15 +71,15 @@ appid_t get_appid(void *pkgl_id, const char *app_name)
 	unsigned int hash = str_hash(app_name);
 	appid_t ret_id;
 
-	spin_lock(&pkgl_dat->hashtable_lock);
+	mutex_lock(&pkgl_dat->hashtable_lock);
 	hash_for_each_possible(pkgl_dat->package_to_appid, hash_cur, hlist, hash) {
 		if (!strcasecmp(app_name, hash_cur->key)) {
 			ret_id = (appid_t)hash_cur->value;
-			spin_unlock(&pkgl_dat->hashtable_lock);
+			mutex_unlock(&pkgl_dat->hashtable_lock);
 			return ret_id;
 		}
 	}
-	spin_unlock(&pkgl_dat->hashtable_lock);
+	mutex_unlock(&pkgl_dat->hashtable_lock);
 	return 0;
 }
 
@@ -148,18 +133,20 @@ static int insert_str_to_int_lock(struct packagelist_data *pkgl_dat, char *key,
 			return 0;
 		}
 	}
-	new_entry = kmem_cache_alloc(hashtable_entry_cachep, GFP_ATOMIC);
+	new_entry = kmem_cache_alloc(hashtable_entry_cachep, GFP_KERNEL);
 	if (!new_entry)
 		return -ENOMEM;
-	new_entry->key = kstrdup(key, GFP_ATOMIC);
+	new_entry->key = kstrdup(key, GFP_KERNEL);
 	new_entry->value = value;
 	hash_add(pkgl_dat->package_to_appid, &new_entry->hlist, hash);
 	return 0;
 }
 
-static void fixup_perms(struct super_block *sb, const char *key) {
+static void fixup_perms(struct super_block *sb) {
 	if (sb && sb->s_magic == SDCARDFS_SUPER_MAGIC) {
-		fixup_perms_recursive(sb->s_root, key, strlen(key));
+		mutex_lock(&sb->s_root->d_inode->i_mutex);
+		get_derive_permissions_recursive(sb->s_root);
+		mutex_unlock(&sb->s_root->d_inode->i_mutex);
 	}
 }
 
@@ -168,13 +155,13 @@ static int insert_str_to_int(struct packagelist_data *pkgl_dat, char *key,
 	int ret;
 	struct sdcardfs_sb_info *sbinfo;
 	mutex_lock(&sdcardfs_super_list_lock);
-	spin_lock(&pkgl_dat->hashtable_lock);
+	mutex_lock(&pkgl_dat->hashtable_lock);
 	ret = insert_str_to_int_lock(pkgl_dat, key, value);
-	spin_unlock(&pkgl_dat->hashtable_lock);
+	mutex_unlock(&pkgl_dat->hashtable_lock);
 
 	list_for_each_entry(sbinfo, &sdcardfs_super_list, list) {
 		if (sbinfo) {
-			fixup_perms(sbinfo->sb, key);
+			fixup_perms(sbinfo->sb);
 		}
 	}
 	mutex_unlock(&sdcardfs_super_list_lock);
@@ -193,196 +180,34 @@ static void remove_str_to_int(struct packagelist_data *pkgl_dat, const char *key
 	struct hashtable_entry *hash_cur;
 	unsigned int hash = str_hash(key);
 	mutex_lock(&sdcardfs_super_list_lock);
-	spin_lock(&pkgl_data_all->hashtable_lock);
+	mutex_lock(&pkgl_dat->hashtable_lock);
 	hash_for_each_possible(pkgl_dat->package_to_appid, hash_cur, hlist, hash) {
 		if (!strcasecmp(key, hash_cur->key)) {
 			remove_str_to_int_lock(hash_cur);
 			break;
 		}
 	}
-	spin_unlock(&pkgl_data_all->hashtable_lock);
+	mutex_unlock(&pkgl_dat->hashtable_lock);
 	list_for_each_entry(sbinfo, &sdcardfs_super_list, list) {
 		if (sbinfo) {
-			fixup_perms(sbinfo->sb, key);
+			fixup_perms(sbinfo->sb);
 		}
 	}
 	mutex_unlock(&sdcardfs_super_list_lock);
 	return;
 }
 
-static void remove_all_hashentries_locked(struct packagelist_data *pkgl_dat)
+static void remove_all_hashentrys(struct packagelist_data *pkgl_dat)
 {
 	struct hashtable_entry *hash_cur;
 	struct hlist_node *h_t;
 	int i;
-	spin_lock(&pkgl_data_all->hashtable_lock);
+	mutex_lock(&pkgl_dat->hashtable_lock);
 	hash_for_each_safe(pkgl_dat->package_to_appid, i, h_t, hash_cur, hlist)
 		remove_str_to_int_lock(hash_cur);
-	spin_unlock(&pkgl_data_all->hashtable_lock);
+	mutex_unlock(&pkgl_dat->hashtable_lock);
 	hash_init(pkgl_dat->package_to_appid);
 }
-
-#ifdef CONFIG_SDCARD_FS_ANDROID_PKGLIST
-static int read_package_list(struct packagelist_data *pkgl_dat) {
-
-	int ret;
-	int fd;
-	int read_amount;
-
-	printk(KERN_INFO "sdcardfs: read_package_list\n");
-
-	spin_lock(&pkgl_dat->hashtable_lock);
-
-	remove_all_hashentries_locked(pkgl_dat);
-
-	fd = sys_open(kpackageslist_file, O_RDONLY, 0);
-	if (fd < 0) {
-		printk(KERN_ERR "sdcardfs: failed to open package list\n");
-		mutex_unlock(&pkgl_dat->hashtable_lock);
-		return fd;
-	}
-
-	while ((read_amount = sys_read(fd, pkgl_dat->read_buf,
-					sizeof(pkgl_dat->read_buf))) > 0) {
-		int appid;
-		int one_line_len = 0;
-		int additional_read;
-
-		while (one_line_len < read_amount) {
-			if (pkgl_dat->read_buf[one_line_len] == '\n') {
-				one_line_len++;
-				break;
-			}
-			one_line_len++;
-		}
-		additional_read = read_amount - one_line_len;
-		if (additional_read > 0)
-			sys_lseek(fd, -additional_read, SEEK_CUR);
-
-		if (sscanf(pkgl_dat->read_buf, "%s %d %*d %*s %*s %s",
-				pkgl_dat->app_name_buf, &appid,
-				pkgl_dat->gids_buf) == 3) {
-			ret = insert_str_to_int_lock(pkgl_dat, pkgl_dat->app_name_buf, appid);
-			if (ret) {
-				sys_close(fd);
-				mutex_unlock(&pkgl_dat->hashtable_lock);
-				return ret;
-			}
-		}
-	}
-
-	sys_close(fd);
-	spin_unlock(&pkgl_dat->hashtable_lock);
-	return 0;
-}
-
-static int packagelist_reader(void *thread_data)
-{
-	struct packagelist_data *pkgl_dat = (struct packagelist_data *)thread_data;
-	struct inotify_event *event;
-	bool active = false;
-	int event_pos;
-	int event_size;
-	int res = 0;
-	int nfd;
-
-	allow_signal(SIGINT);
-
-	nfd = sys_inotify_init();
-	if (nfd < 0) {
-		printk(KERN_ERR "sdcardfs: inotify_init failed: %d\n", nfd);
-		return nfd;
-	}
-
-	while (!kthread_should_stop()) {
-		if (signal_pending(current)) {
-			ssleep(1);
-			continue;
-		}
-
-		if (!active) {
-			res = sys_inotify_add_watch(nfd, kpackageslist_file, IN_DELETE_SELF);
-			if (res < 0) {
-				if (res == -ENOENT || res == -EACCES) {
-				/* Framework may not have created yet, sleep and retry */
-					printk(KERN_ERR "sdcardfs: missing packages.list; retrying\n");
-					ssleep(2);
-					printk(KERN_ERR "sdcardfs: missing packages.list_end; retrying\n");
-					continue;
-				} else {
-					printk(KERN_ERR "sdcardfs: inotify_add_watch failed: %d\n", res);
-					goto interruptable_sleep;
-				}
-			}
-			/* Watch above will tell us about any future changes, so
-			 * read the current state. */
-			res = read_package_list(pkgl_dat);
-			if (res) {
-				printk(KERN_ERR "sdcardfs: read_package_list failed: %d\n", res);
-				goto interruptable_sleep;
-			}
-			active = true;
-		}
-
-		event_pos = 0;
-		res = sys_read(nfd, pkgl_dat->event_buf, sizeof(pkgl_dat->event_buf));
-		if (res < (int) sizeof(*event)) {
-			if (res == -EINTR)
-				continue;
-			printk(KERN_ERR "sdcardfs: failed to read inotify event: %d\n", res);
-			goto interruptable_sleep;
-		}
-
-		while (res >= (int) sizeof(*event)) {
-			event = (struct inotify_event *) (pkgl_dat->event_buf + event_pos);
-
-			printk(KERN_INFO "sdcardfs: inotify event: %08x\n", event->mask);
-			if ((event->mask & IN_IGNORED) == IN_IGNORED) {
-				/* Previously watched file was deleted, probably due to move
-				 * that swapped in new data; re-arm the watch and read. */
-				active = false;
-			}
-
-			event_size = sizeof(*event) + event->len;
-			res -= event_size;
-			event_pos += event_size;
-		}
-		continue;
-
-interruptable_sleep:
-		set_current_state(TASK_INTERRUPTIBLE);
-		schedule();
-	}
-	flush_signals(current);
-	sys_close(nfd);
-	return res;
-}
-
-struct packagelist_data * package_reader_create(struct packagelist_data *pkgl_dat)
-{
-	struct task_struct *packagelist_thread;
-
-	packagelist_thread = kthread_run(packagelist_reader, (void *)pkgl_dat, "pkgld");
-	if (IS_ERR(packagelist_thread)) {
-		printk(KERN_ERR "sdcardfs: creating kthread failed\n");
-		kfree(pkgl_dat);
-		goto out;
-	}
-	pkgl_dat->thread_id = packagelist_thread;
-
-	printk(KERN_INFO "sdcardfs: created packagelist pkgld/%d\n",
-				(int)pkgl_dat->thread_id->pid);
-
-out:
-	return pkgl_dat;
-}
-
-void package_reader_destroy(struct packagelist_data * pkgl_dat)
-{
-	force_sig_info(SIGINT, SEND_SIG_PRIV, pkgl_dat->thread_id);
-	kthread_stop(pkgl_dat->thread_id);
-}
-#endif
 
 static struct packagelist_data * packagelist_create(void)
 {
@@ -390,28 +215,19 @@ static struct packagelist_data * packagelist_create(void)
 
 	pkgl_dat = kmalloc(sizeof(*pkgl_dat), GFP_KERNEL | __GFP_ZERO);
 	if (!pkgl_dat) {
-		printk(KERN_ERR "sdcardfs: Failed to create hash\n");
+                printk(KERN_ERR "sdcardfs: Failed to create hash\n");
 		return ERR_PTR(-ENOMEM);
 	}
 
-	spin_lock_init(&pkgl_dat->hashtable_lock);
+	mutex_init(&pkgl_dat->hashtable_lock);
 	hash_init(pkgl_dat->package_to_appid);
 
-#ifdef CONFIG_SDCARD_FS_ANDROID_PKGLIST
-	return package_reader_create(pkgl_dat);
-#else
 	return pkgl_dat;
-#endif
 }
 
 static void packagelist_destroy(struct packagelist_data *pkgl_dat)
 {
-	spin_lock(&pkgl_dat->hashtable_lock);
-#ifdef CONFIG_SDCARD_FS_ANDROID_PKGLIST
-	package_reader_destroy(pkgl_dat);
-#endif
-	remove_all_hashentries_locked(pkgl_dat);
-	spin_unlock(&pkgl_dat->hashtable_lock);
+	remove_all_hashentrys(pkgl_dat);
 	printk(KERN_INFO "sdcardfs: destroyed packagelist pkgld\n");
 	kfree(pkgl_dat);
 }
@@ -536,7 +352,7 @@ static ssize_t packages_attr_show(struct config_item *item,
 	int count = 0, written = 0;
 	char errormsg[] = "<truncated>\n";
 
-	spin_lock(&pkgl_data_all->hashtable_lock);
+	mutex_lock(&pkgl_data_all->hashtable_lock);
 	hash_for_each_safe(pkgl_data_all->package_to_appid, i, h_t, hash_cur, hlist) {
 		written = scnprintf(page + count, PAGE_SIZE - sizeof(errormsg) - count, "%s %d\n", (char *)hash_cur->key, hash_cur->value);
 		if (count + written == PAGE_SIZE - sizeof(errormsg)) {
@@ -545,7 +361,7 @@ static ssize_t packages_attr_show(struct config_item *item,
 		}
 		count += written;
 	}
-	spin_unlock(&pkgl_data_all->hashtable_lock);
+	mutex_unlock(&pkgl_data_all->hashtable_lock);
 
 	return count;
 }
@@ -619,7 +435,7 @@ int packagelist_init(void)
 
 	pkgl_data_all = packagelist_create();
 	configfs_sdcardfs_init();
-	return 0;
+        return 0;
 }
 
 void packagelist_exit(void)
