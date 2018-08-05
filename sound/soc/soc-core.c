@@ -2103,14 +2103,13 @@ unsigned int snd_soc_read(struct snd_soc_codec *codec, unsigned int reg)
 {
 	unsigned int ret;
 
-        if (codec->read) {
+	if (codec->read) {
 		ret = codec->read(codec, reg);
 		dev_dbg(codec->dev, "read %x => %x\n", reg, ret);
 		trace_snd_soc_reg_read(codec, reg, ret);
-        }
-        else
-		ret = -1;
-
+	} else {
+		ret = -EIO;
+	}
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_read);
@@ -2122,9 +2121,9 @@ unsigned int snd_soc_write(struct snd_soc_codec *codec,
 		dev_dbg(codec->dev, "write %x = %x\n", reg, val);
 		trace_snd_soc_reg_write(codec, reg, val);
 		return codec->write(codec, reg, val);
-        }
-	else
-		return -1;
+	} else {
+		return -EIO;
+	}
 }
 EXPORT_SYMBOL_GPL(snd_soc_write);
 

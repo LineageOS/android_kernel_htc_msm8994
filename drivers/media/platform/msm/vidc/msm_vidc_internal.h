@@ -313,6 +313,7 @@ struct msm_vidc_inst {
 	atomic_t seq_hdr_reqs;
 	struct v4l2_ctrl **ctrls;
 	bool dcvs_mode;
+	u32 buffers_held_in_driver;
     /* HTC_START: Pass calling process id and name in kernel space */
     pid_t call_pid;
     char process_name[50];

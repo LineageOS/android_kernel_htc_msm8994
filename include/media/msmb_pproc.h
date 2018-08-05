@@ -28,6 +28,7 @@
 #endif
 #define MSM_CPP_MAX_FW_NAME_LEN 32
 #define MAX_FREQ_TBL 10
+#define MSM_OUTPUT_BUF_CNT 8
 
 enum msm_cpp_frame_type {
 	MSM_CPP_OFFLINE_FRAME,
@@ -347,7 +348,7 @@ struct msm_cpp_frame_info_t {
 	uint32_t feature_mask;
 	uint8_t we_disable;
 	struct msm_cpp_buffer_info_t input_buffer_info;
-	struct msm_cpp_buffer_info_t output_buffer_info[8];
+	struct msm_cpp_buffer_info_t output_buffer_info[MSM_OUTPUT_BUF_CNT];
 	struct msm_cpp_buffer_info_t duplicate_buffer_info;
 	struct msm_cpp_buffer_info_t tnr_scratch_buffer_info[2];
 	uint32_t reserved;
@@ -569,7 +570,7 @@ struct msm_cpp_frame_info32_t {
 	uint32_t feature_mask;
 	uint8_t we_disable;
 	struct msm_cpp_buffer_info_t input_buffer_info;
-	struct msm_cpp_buffer_info_t output_buffer_info[8];
+	struct msm_cpp_buffer_info_t output_buffer_info[MSM_OUTPUT_BUF_CNT];
 	struct msm_cpp_buffer_info_t duplicate_buffer_info;
 	struct msm_cpp_buffer_info_t tnr_scratch_buffer_info[2];
 	uint32_t reserved;
